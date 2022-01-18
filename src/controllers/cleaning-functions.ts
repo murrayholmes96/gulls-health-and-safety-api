@@ -1,6 +1,5 @@
 import utils from 'naturescot-utils';
-import axios, {AxiosResponse} from 'axios';
-import config from '../config/app';
+import {AssessmentInterface} from 'models/assessment';
 
 /**
  * Cleans the on behalf contact details into something the database can use.
@@ -45,7 +44,7 @@ const cleanLicenseHolderContact = (body: any): any => {
  */
 const cleanAddress = (body: any): any => {
   return {
-    uprn: body.uprn === undefined ? undefined : body.uprn,
+    uprn: body.uprn === undefined ? undefined : (body.uprn as string),
     postcode: body.postcode.trim(),
     addressLine1: body.manualAddress?.addressLine1 === undefined ? undefined : body.manualAddress?.addressLine1.trim(),
     addressLine2: body.manualAddress?.addressLine2 === undefined ? undefined : body.manualAddress?.addressLine2.trim(),
@@ -63,7 +62,7 @@ const cleanAddress = (body: any): any => {
  */
 const cleanSiteAddress = (body: any): any => {
   return {
-    uprn: body.siteUprn === undefined ? undefined : body.siteUprn,
+    uprn: body.siteUprn === undefined ? undefined : (body.siteUprn as string),
     postcode: body.sitePostcode.trim(),
     addressLine1:
       body.siteManualAddress?.addressLine1 === undefined ? undefined : body.siteManualAddress?.addressLine1.trim(),
@@ -86,8 +85,10 @@ const cleanApplication = (body: any): any => {
   return {
     isResidentialSite: body.isResidentialSite,
     siteType: body.isResidentialSite ? body.residentialType : body.commercialType,
-    previousLicenceNumber: body.previousLicence ? body.previousLicenceNumber.trim() : undefined,
+    previousLicence: body.previousLicense,
+    previousLicenceNumber: body.previousLicenseNumber ? body.previousLicenseNumber.trim() : undefined,
     supportingInformation: body.supportingInformation === undefined ? undefined : body.supportingInformation.trim(),
+    confirmedByLicensingHolder: !body.onBehalf,
   };
 };
 
@@ -191,8 +192,8 @@ const cleanMeasure = (body: any): any => {
       : body.measuresIntendToTry.disturbanceByDogs
       ? 'Intend'
       : 'No',
-    measuresTriedDetail: body.measuresTriedMoreDetail.trim(),
-    measuresWillNotTryDetail: body.measuresIntendNotToTry.trim(),
+    measuresTriedDetail: body.measuresTriedMoreDetail ? body.measuresTriedMoreDetail.trim() : undefined,
+    measuresWillNotTryDetail: body.measuresIntendNotToTry ? body.measuresIntendNotToTry.trim() : undefined,
   };
 };
 
@@ -202,50 +203,41 @@ const cleanMeasure = (body: any): any => {
  * @param {number} uprn The UPRN to resolve to an address.
  * @returns {any} The address details for the passed UPRN.
  */
-const cleanAddressFromUprn = async (uprn: number): Promise<any> => {
-  // Send axios GET request to the Postcode lookup service with the auth token.
-  const serverResponse: AxiosResponse = await axios.get('https://cagmap.snh.gov.uk/gazetteer', {
-    params: {
-      uprn,
-      fieldset: 'all',
-    },
-    headers: {
-      Authorization: `Bearer ${config.postcodeApiKey}`,
-    },
-  });
 
-  const subBuildingName = serverResponse.data.results[0].address[0].sub_building_name
-    ? String(serverResponse.data.results[0].address[0].sub_building_name)
-    : '';
-  const organisationName = serverResponse.data.results[0].address[0].rm_organisation_name
-    ? String(serverResponse.data.results[0].address[0].rm_organisation_name)
-    : '';
-  const buildingNumber = serverResponse.data.results[0].address[0].building_number
-    ? String(serverResponse.data.results[0].address[0].building_number)
-    : '';
-  const buildingName = serverResponse.data.results[0].address[0].building_name
-    ? String(serverResponse.data.results[0].address[0].building_name)
-    : '';
+/**
+ * Clean an incoming PATCH request body to make it more compatible with the
+ * database and its validation rules.
+ *
+ * @param {any} body The incoming request's body.
+ * @returns {any} CleanedBody a json object that's just got our cleaned up fields on it.
+ */
+const cleanAssessment = (body: any): any => {
+  const cleanedBody: AssessmentInterface = {};
 
-  const addressLine1 = `${subBuildingName} ${organisationName} ${buildingNumber} ${buildingName}`;
+  // Check for the existence of each field and if found clean it if required and add to the cleanedBody object.
+  if (body.testOneAssessment) {
+    cleanedBody.testOneAssessment = body.testOneAssessment.trim();
+  }
 
-  return {
-    uprn: serverResponse.data.results[0].address[0].uprn,
-    postcode: serverResponse.data.results[0].address[0].postcode
-      ? serverResponse.data.results[0].address[0].postcode
-      : '',
-    addressLine1,
-    addressLine2: serverResponse.data.results[0].address[0].street_description
-      ? serverResponse.data.results[0].address[0].street_description
-      : '',
-    addressTown: serverResponse.data.results[0].address[0].post_town
-      ? serverResponse.data.results[0].address[0].post_town
-      : '',
-    addressCounty: serverResponse.data.results[0].address[0].administrative_area
-      ? serverResponse.data.results[0].address[0].administrative_area
-      : '',
-  };
+  if ('testOneDecision' in body) {
+    cleanedBody.testOneDecision = body.testOneDecision;
+  }
+
+  if (body.testTwoAssessment) {
+    cleanedBody.testTwoAssessment = body.testTwoAssessment.trim();
+  }
+
+  if ('testTwoDecision' in body) {
+    cleanedBody.testTwoDecision = body.testTwoDecision;
+  }
+
+  if ('decision' in body) {
+    cleanedBody.decision = body.decision;
+  }
+
+  return cleanedBody;
 };
+
 /* eslint-enable editorconfig/indent */
 
 const CleaningFunctions = {
@@ -257,7 +249,7 @@ const CleaningFunctions = {
   cleanIssue,
   cleanActivity,
   cleanMeasure,
-  cleanAddressFromUprn,
+  cleanAssessment,
 };
 
 export default CleaningFunctions;

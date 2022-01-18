@@ -1,7 +1,16 @@
+import * as jwt from 'jsonwebtoken';
+
 import transaction from 'sequelize/types/lib/transaction';
 import database from '../models/index.js';
+import config from '../config/app';
+import jwk from '../config/jwk.js';
 
-const {Application, Contact, Address, Activity, Issue, Measure, Species} = database;
+const {Application, Contact, Address, Activity, Issue, Measure, Species, Assessment} = database;
+
+// Disabled rules because Notify client has no index.js and implicitly has "any" type, and this is how the import is done
+// in the Notify documentation - https://docs.notifications.service.gov.uk/node.html
+/* eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports, unicorn/prefer-module, prefer-destructuring */
+const NotifyClient = require('notifications-node-client').NotifyClient;
 
 /**
  * Local interface to hold the species ID foreign keys.
@@ -17,7 +26,7 @@ interface SpeciesIds {
 /**
  * Local interface of the application.
  */
-interface application {
+interface ApplicationInterface {
   id: number;
   LicenceHolderId: number;
   LicenceApplicantId: number;
@@ -26,17 +35,269 @@ interface application {
   SpeciesId: number;
   isResidentialSite: boolean;
   siteType: string;
+  previousLicence: boolean;
   previousLicenceNumber: string;
   supportingInformation: string;
+  confirmedByLicensingHolder: boolean;
 }
+
+// Create a more user friendly displayable date from a date object.
+const createDisplayDate = (date: Date) => {
+  return date.toLocaleDateString('en-GB', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'});
+};
+
+/**
+ * This function returns an object containing the details required for the license holder direct email.
+ *
+ * @param {any} newApplication The newly created application, from which we get the application ID.
+ * @param {any} licenceHolderContact The licence holder's contact details.
+ * @param {any} siteAddress The address of the site to which the licence pertains.
+ * @returns {any} An object with the required details set.
+ */
+const setLicenceHolderDirectEmailDetails = (newApplication: any, licenceHolderContact: any, siteAddress: any) => {
+  return {
+    licenceName: licenceHolderContact.name,
+    applicationDate: createDisplayDate(new Date(newApplication.createdAt)),
+    siteName: siteAddress.addressLine1,
+    id: newApplication.id,
+  };
+};
+
+/**
+ * This function returns an object containing the details required for the licence holder and the
+ * licence applicant confirmation emails.
+ *
+ * @param {number} id The confirmed application's reference number.
+ * @param {string} createdAt The date the application was created on.
+ * @param {any} licenceHolderContact The licence holder's contact details.
+ * @param {any} onBehalfContact The licence applicant's contact details.
+ * @param {any} siteAddress The address of the site to which the licence pertains.
+ * @returns {any} An object with the required details set.
+ */
+const setHolderApplicantConfirmEmailDetails = (
+  id: number,
+  createdAt: string,
+  licenceHolderContact: any,
+  onBehalfContact: any,
+  siteAddress: any,
+) => {
+  return {
+    lhName: licenceHolderContact.name,
+    laName: onBehalfContact.name,
+    applicationDate: createDisplayDate(new Date(createdAt)),
+    siteName: siteAddress.addressLine1,
+    id,
+  };
+};
+
+/**
+ * This function calls the Notify API and asks for an email to be sent with the supplied details.
+ *
+ * @param {any} emailDetails The details to use in the email to be sent.
+ * @param {any} emailAddress The email address to send the email to.
+ */
+const sendLicenceHolderDirectEmail = async (emailDetails: any, emailAddress: any) => {
+  if (config.notifyApiKey) {
+    const notifyClient = new NotifyClient(config.notifyApiKey);
+    notifyClient.sendEmail('5892536f-15cb-4787-82dc-d9b83ccc00ba', emailAddress, {
+      personalisation: emailDetails,
+      emailReplyToId: '4b49467e-2a35-4713-9d92-809c55bf1cdd',
+    });
+  }
+};
+
+/**
+ * This function returns an object containing the details required for the license applicant notification email.
+ *
+ * @param {any} licenceApplicantContact The licence applicant's contact details.
+ * @param {any} licenceHolderContact The licence holder's contact details.
+ * @returns {any} An object with the required details set.
+ */
+const setLicenceApplicantNotificationDetails = (licenceApplicantContact: any, licenceHolderContact: any) => {
+  return {
+    laName: licenceApplicantContact.name,
+    lhName: licenceHolderContact.name,
+    lhOrg: licenceHolderContact.organisation,
+    lhEmail: licenceHolderContact.emailAddress,
+  };
+};
+
+/**
+ * This function calls the Notify API and asks for an email to be send with the supplied details.
+ *
+ * @param {any} emailDetails The details to use in the email to be sent.
+ * @param {any} emailAddress The email address to send the email to.
+ */
+const sendLicenceApplicantNotificationEmail = async (emailDetails: any, emailAddress: any) => {
+  if (config.notifyApiKey) {
+    const notifyClient = new NotifyClient(config.notifyApiKey);
+    notifyClient.sendEmail('6955dccf-c7ad-460f-8d5d-82ad984d018a', emailAddress, {
+      personalisation: emailDetails,
+      emailReplyToId: '4b49467e-2a35-4713-9d92-809c55bf1cdd',
+    });
+  }
+};
+
+/**
+ * This function returns an object containing the details required for the licence holders magic link email.
+ *
+ * @param {string} confirmBaseUrl The micro-frontend we want to send the lh to to confirm their licence.
+ * @param {number} applicationId The application we want the lh to confirm.
+ * @param {any} licenceHolderContact The licence holder's contact details.
+ * @param {any} licenceApplicantContact The licence applicant's contact details.
+ * @returns {any} An object with the required details set.
+ */
+const setLicenceHolderMagicLinkDetails = async (
+  confirmBaseUrl: string,
+  applicationId: number,
+  licenceHolderContact: any,
+  licenceApplicantContact: any,
+) => {
+  // Get the private key.
+  const privateKey = await jwk.getPrivateKey({type: 'pem'});
+
+  // Create JWT.
+  const token = jwt.sign({}, privateKey as string, {
+    algorithm: 'ES256',
+    expiresIn: '28 days',
+    noTimestamp: true,
+    subject: `${applicationId}`,
+  });
+
+  // Append JWT to confirm url.
+  const magicLink = `${confirmBaseUrl}${token}`;
+
+  return {
+    lhName: licenceHolderContact.name,
+    onBehalfName: licenceApplicantContact.name,
+    onBehalfOrg: licenceApplicantContact.organisation,
+    onBehalfEmail: licenceApplicantContact.emailAddress,
+    magicLink,
+  };
+};
+
+/**
+ * This function calls the Notify API and asks for an email to be sent to the licence holder
+ * and the licence applicant to confirm the application.
+ *
+ * @param {any} emailDetails The details to use in the email to be sent.
+ * @param {any} emailAddress The email address to send the email to.
+ */
+const sendLicenceHolderMagicLinkEmail = async (emailDetails: any, emailAddress: any) => {
+  if (config.notifyApiKey) {
+    const notifyClient = new NotifyClient(config.notifyApiKey);
+    notifyClient.sendEmail('e2d7bea5-c487-448c-afa4-1360fe966eab', emailAddress, {
+      personalisation: emailDetails,
+      emailReplyToId: '4b49467e-2a35-4713-9d92-809c55bf1cdd',
+    });
+  }
+};
+
+/**
+ * This function calls the Notify API and asks for an email to be send with the supplied details.
+ *
+ * @param {any} emailDetails The details to use in the email to be sent.
+ * @param {any} emailAddress The email address to send the email to.
+ */
+const sendHolderApplicantConfirmEmail = async (emailDetails: any, emailAddress: any) => {
+  if (config.notifyApiKey) {
+    const notifyClient = new NotifyClient(config.notifyApiKey);
+    notifyClient.sendEmail('b227af1f-4709-4be5-a111-66605dcf0525', emailAddress, {
+      personalisation: emailDetails,
+      emailReplyToId: '4b49467e-2a35-4713-9d92-809c55bf1cdd',
+    });
+  }
+};
 
 const ApplicationController = {
   findOne: async (id: number) => {
-    return Application.findByPk(id);
+    return Application.findByPk(id, {
+      include: [
+        {
+          model: Contact,
+          as: 'LicenceHolder',
+        },
+        {
+          model: Contact,
+          as: 'LicenceApplicant',
+        },
+        {
+          model: Address,
+          as: 'LicenceHolderAddress',
+        },
+        {
+          model: Address,
+          as: 'SiteAddress',
+        },
+        {
+          model: Species,
+          as: 'Species',
+          include: [
+            {
+              model: Activity,
+              as: 'HerringGull',
+            },
+            {
+              model: Activity,
+              as: 'BlackHeadedGull',
+            },
+            {
+              model: Activity,
+              as: 'CommonGull',
+            },
+            {
+              model: Activity,
+              as: 'GreatBlackBackedGull',
+            },
+            {
+              model: Activity,
+              as: 'LesserBlackBackedGull',
+            },
+          ],
+        },
+        {
+          model: Issue,
+          as: 'ApplicationIssue',
+        },
+        {
+          model: Measure,
+          as: 'ApplicationMeasure',
+        },
+        {
+          model: Assessment,
+          as: 'ApplicationAssessment',
+        },
+      ],
+    });
   },
 
   findAll: async () => {
     return Application.findAll();
+  },
+
+  /**
+   * This function returns all applications, including the licence holder and applicant details,
+   * and the site address details.
+   *
+   * @returns {any} Returns an array of applications with the contact and site address details included.
+   */
+  findAllSummary: async () => {
+    return Application.findAll({
+      include: [
+        {
+          model: Contact,
+          as: 'LicenceHolder',
+        },
+        {
+          model: Contact,
+          as: 'LicenceApplicant',
+        },
+        {
+          model: Address,
+          as: 'SiteAddress',
+        },
+      ],
+    });
   },
 
   /**
@@ -54,7 +315,8 @@ const ApplicationController = {
    * @param {any | undefined} lesserBlackBackedActivity The lesser black-backed gull activities to be licensed.
    * @param {any | undefined} measure The measures taken / not taken details.
    * @param {any | undefined} incomingApplication The application details.
-   * @returns {application} Returns newApplication, the newly created application.
+   * @param {string} confirmBaseUrl The micro-frontend we want to send the lh to to confirm their licence.
+   * @returns {ApplicationInterface} Returns newApplication, the newly created application.
    */
   create: async (
     onBehalfContact: any | undefined,
@@ -69,6 +331,7 @@ const ApplicationController = {
     lesserBlackBackedActivity: any | undefined,
     measure: any,
     incomingApplication: any,
+    confirmBaseUrl: string,
   ) => {
     const speciesIds: SpeciesIds = {
       HerringGullId: undefined,
@@ -165,14 +428,104 @@ const ApplicationController = {
       await Issue.create(issue, {transaction: t});
     });
 
+    // If the licence applicant applied on the license holder behalf so send them a confirmation email
+    // and send the email to the license holder containing the magic link.
+    if (newApplication && onBehalfContact) {
+      // Set the details of the emails.
+      const emailDetails = setLicenceApplicantNotificationDetails(onBehalfContact, licenceHolderContact);
+      const magicLinkEmailDetails = await setLicenceHolderMagicLinkDetails(
+        confirmBaseUrl,
+        (newApplication as any).id,
+        licenceHolderContact,
+        onBehalfContact,
+      );
+      try {
+        // Send the email using the Notify service's API.
+        await sendLicenceApplicantNotificationEmail(emailDetails, onBehalfContact.emailAddress);
+        await sendLicenceHolderMagicLinkEmail(magicLinkEmailDetails, licenceHolderContact.emailAddress);
+      } catch (error: unknown) {
+        return error;
+      }
+    } else {
+      // Else if the licence holder applied directly send them a confirmation email.
+      // Set the details of the email.
+      const emailDetails = setLicenceHolderDirectEmailDetails(newApplication, licenceHolderContact, siteAddress);
+      try {
+        // Send the email using the Notify service's API.
+        await sendLicenceHolderDirectEmail(emailDetails, licenceHolderContact.emailAddress);
+      } catch (error: unknown) {
+        return error;
+      }
+    }
+
     // If all went well and we have a new application return it.
     if (newApplication) {
-      return newApplication as application;
+      return newApplication as ApplicationInterface;
     }
 
     // If no new application was added to the DB return undefined.
     return undefined;
   },
+
+  confirm: async (id: number, confirmApplication: ApplicationInterface) => {
+    let confirmedApplication;
+    // Start the transaction.
+    await database.sequelize.transaction(async (t: transaction) => {
+      // Save the new values to the database.
+      confirmedApplication = await Application.update(confirmApplication, {where: {id}, transaction: t});
+    });
+
+    // If we have a confirmed application get some of its details to use in the confirmation emails.
+    if (confirmedApplication) {
+      const updatedApplication: any = await Application.findByPk(id, {
+        include: [
+          {
+            model: Contact,
+            as: 'LicenceHolder',
+          },
+          {
+            model: Contact,
+            as: 'LicenceApplicant',
+          },
+          {
+            model: Address,
+            as: 'SiteAddress',
+          },
+        ],
+      });
+
+      // The details required to generate the confirmation emails.
+      let emailDetails;
+
+      // Set the details required to generate the confirmation emails.
+      if (updatedApplication) {
+        emailDetails = setHolderApplicantConfirmEmailDetails(
+          updatedApplication.id,
+          updatedApplication.createdAt,
+          updatedApplication.LicenceHolder,
+          updatedApplication.LicenceApplicant,
+          updatedApplication.SiteAddress,
+        );
+      }
+
+      try {
+        // Send the email using the Notify service's API.
+        await sendHolderApplicantConfirmEmail(emailDetails, updatedApplication.LicenceHolder.emailAddress);
+        await sendHolderApplicantConfirmEmail(emailDetails, updatedApplication.LicenceApplicant.emailAddress);
+      } catch (error: unknown) {
+        return error;
+      }
+    }
+
+    // If all went well and we have confirmed a application return it.
+    if (confirmedApplication) {
+      return confirmedApplication as ApplicationInterface;
+    }
+
+    // If no application was confirmed return undefined.
+    return undefined;
+  },
 };
 
 export {ApplicationController as default};
+export {ApplicationInterface};
