@@ -1,5 +1,7 @@
 import utils from 'naturescot-utils';
 import {AssessmentInterface} from 'models/assessment';
+import Condition from './condition';
+import Advisory from './advisory';
 
 /**
  * Cleans the on behalf contact details into something the database can use.
@@ -88,7 +90,8 @@ const cleanApplication = (body: any): any => {
     previousLicence: body.previousLicense,
     previousLicenceNumber: body.previousLicenseNumber ? body.previousLicenseNumber.trim() : undefined,
     supportingInformation: body.supportingInformation === undefined ? undefined : body.supportingInformation.trim(),
-    confirmedByLicensingHolder: !body.onBehalf,
+    confirmedByLicenseHolder: !body.onBehalf,
+    staffNumber: body.staffNumber ? body.staffNumber : undefined,
   };
 };
 
@@ -155,6 +158,74 @@ const cleanActivity = (body: any, gullType: string): any => {
   };
 };
 
+/**
+ * Cleans the permitted activity details into something the database can use.
+ *
+ * @param {any} body The body of the request to be cleaned.
+ * @param {string} gullType The type of gull the activities relate to.
+ * @returns {any} The cleaned activity details.
+ */
+const cleanPermittedActivity = (body: any, gullType: string): any => {
+  return {
+    removeNests: body.species?.[gullType].activities.removeNests,
+    quantityNestsToRemove: body.species?.[gullType].activities.quantityNestsToRemove
+      ? rangesIntoIntegers(body.species?.[gullType].activities.quantityNestsToRemove)
+      : undefined,
+    eggDestruction: body.species?.[gullType].activities.eggDestruction,
+    quantityNestsWhereEggsDestroyed: body.species?.[gullType].activities.quantityNestsWhereEggsDestroyed
+      ? rangesIntoIntegers(body.species?.[gullType].activities.quantityNestsWhereEggsDestroyed)
+      : undefined,
+    chicksToRescueCentre: body.species?.[gullType].activities.chicksToRescueCentre,
+    quantityChicksToRescue: body.species?.[gullType].activities.quantityChicksToRescue
+      ? body.species?.[gullType].activities.quantityChicksToRescue
+      : undefined,
+    chicksRelocateNearby: body.species?.[gullType].activities.chicksRelocateNearby,
+    quantityChicksToRelocate: body.species?.[gullType].activities.quantityChicksToRelocate
+      ? body.species?.[gullType].activities.quantityChicksToRelocate
+      : undefined,
+    killChicks: body.species?.[gullType].activities.killChicks,
+    quantityChicksToKill: body.species?.[gullType].activities.quantityChicksToKill
+      ? body.species?.[gullType].activities.quantityChicksToKill
+      : undefined,
+    killAdults: body.species?.[gullType].activities.killAdults,
+    quantityAdultsToKill: body.species?.[gullType].activities.quantityAdultsToKill
+      ? body.species?.[gullType].activities.quantityAdultsToKill
+      : undefined,
+  };
+};
+
+/**
+ * This function returns a integer value instead of a string range.
+ *
+ * @param {string} range The range to made more readable.
+ * @returns {string} A more accurate and readable range as a string.
+ */
+const rangesIntoIntegers = (range: string | undefined): number => {
+  let displayableRange;
+  switch (range) {
+    case 'upTo10':
+      displayableRange = 10;
+      break;
+    case 'upTo50':
+      displayableRange = 50;
+      break;
+    case 'upTo100':
+      displayableRange = 100;
+      break;
+    case 'upTo500':
+      displayableRange = 500;
+      break;
+    case 'upTo1000':
+      displayableRange = 1000;
+      break;
+    default:
+      displayableRange = 0;
+      break;
+  }
+
+  return displayableRange;
+};
+
 // Disabled because of conflict between editorconfig and prettier.
 /* eslint-disable editorconfig/indent */
 /**
@@ -198,13 +269,6 @@ const cleanMeasure = (body: any): any => {
 };
 
 /**
- * This function returns an address object for a supplied UPRN.
- *
- * @param {number} uprn The UPRN to resolve to an address.
- * @returns {any} The address details for the passed UPRN.
- */
-
-/**
  * Clean an incoming PATCH request body to make it more compatible with the
  * database and its validation rules.
  *
@@ -235,7 +299,112 @@ const cleanAssessment = (body: any): any => {
     cleanedBody.decision = body.decision;
   }
 
+  if ('assessedBy' in body) {
+    cleanedBody.assessedBy = body.assessedBy;
+  }
+
+  if (body.refusalReason) {
+    cleanedBody.refusalReason = body.refusalReason;
+  }
+
   return cleanedBody;
+};
+
+/**
+ * Clean an incoming request body to make it more compatible with the
+ * database and its validation rules.
+ *
+ * @param {any} body The incoming request's body.
+ * @returns {Condition[] | undefined} CleanedBody a json object that's just got our cleaned up fields on it.
+ */
+const cleanCondition = async (body: any) => {
+  const optionalConditions = [];
+  /* eslint-disable no-await-in-loop */
+  for (const condition of body.conditions) {
+    const findOptionalCondition = await Condition.findOne(condition);
+    if (findOptionalCondition) {
+      optionalConditions.push(findOptionalCondition);
+    }
+  }
+
+  if (optionalConditions.length > 0) {
+    return optionalConditions;
+  }
+
+  return undefined;
+};
+
+/**
+ * Clean an incoming request body to make it more compatible with the
+ * database and its validation rules.
+ *
+ * @param {any} body The incoming request's body.
+ * @returns {Advisory[] | undefined} CleanedBody a json object that's just got our cleaned up fields on it.
+ */
+const cleanAdvisory = async (body: any) => {
+  const optionalAdvisories = [];
+
+  for (const advisory of body.advisories) {
+    const findOptionalAdvisory = await Advisory.findOne(advisory);
+    if (findOptionalAdvisory) {
+      optionalAdvisories.push(findOptionalAdvisory);
+    }
+  }
+
+  if (optionalAdvisories.length > 0) {
+    return optionalAdvisories;
+  }
+
+  return undefined;
+};
+/* eslint-enable no-await-in-loop */
+
+/**
+ * Clean an incoming request body to make it more compatible with the
+ * database and its validation rules.
+ *
+ * @param {any} body The incoming request's body.
+ * @returns {any} CleanedBody a json object that's just got our cleaned up fields on it.
+ */
+const cleanLicense = (body: any): any => {
+  return {
+    periodFrom: body.periodFrom,
+    periodTo: body.periodTo,
+    createdBy: body.createdBy,
+  };
+};
+
+/**
+ * Clean the incoming request body to make it more compatible with the
+ * database and its validation rules.
+ *
+ * @param {number} existingId The application that is being revoked.
+ * @param {any} body The incoming request's body.
+ * @returns {any} A json object that's just got our cleaned up fields on it.
+ */
+const cleanWithdrawOrRevokeInput = (existingId: number, body: any) => {
+  return {
+    ApplicationId: existingId,
+    // The strings are trimmed for leading and trailing whitespace and then
+    // copied across if they're in the POST body or are set to undefined if
+    // they're missing.
+    reason: body.reason === undefined ? undefined : body.reason.trim(),
+    createdBy: body.createdBy === undefined ? undefined : body.createdBy.trim(),
+  };
+};
+
+/**
+ * Clean an incoming request body to make it more compatible with the
+ * database and its validation rules.
+ *
+ * @param {any} body The incoming request's body.
+ * @returns {any} CleanedBody a json object that's just got our cleaned up fields on it.
+ */
+const cleanNote = (body: any): any => {
+  return {
+    Note: body.note.trim(),
+    createdBy: body.createdBy,
+  };
 };
 
 /* eslint-enable editorconfig/indent */
@@ -248,8 +417,14 @@ const CleaningFunctions = {
   cleanApplication,
   cleanIssue,
   cleanActivity,
+  cleanPermittedActivity,
   cleanMeasure,
   cleanAssessment,
+  cleanCondition,
+  cleanAdvisory,
+  cleanLicense,
+  cleanNote,
+  cleanWithdrawOrRevokeInput,
 };
 
 export default CleaningFunctions;

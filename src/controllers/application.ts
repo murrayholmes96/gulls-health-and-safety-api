@@ -5,7 +5,26 @@ import database from '../models/index.js';
 import config from '../config/app';
 import jwk from '../config/jwk.js';
 
-const {Application, Contact, Address, Activity, Issue, Measure, Species, Assessment} = database;
+const {
+  Application,
+  Contact,
+  Address,
+  Activity,
+  PermittedActivity,
+  Issue,
+  Measure,
+  Species,
+  PermittedSpecies,
+  Assessment,
+  License,
+  LicenseAdvisory,
+  Advisory,
+  LicenseCondition,
+  Condition,
+  Note,
+  Revocation,
+  Withdrawal,
+} = database;
 
 // Disabled rules because Notify client has no index.js and implicitly has "any" type, and this is how the import is done
 // in the Notify documentation - https://docs.notifications.service.gov.uk/node.html
@@ -33,12 +52,14 @@ interface ApplicationInterface {
   LicenceHolderAddressId: number;
   SiteAddressId: number;
   SpeciesId: number;
+  PermittedSpeciesId: number;
   isResidentialSite: boolean;
   siteType: string;
   previousLicence: boolean;
   previousLicenceNumber: string;
   supportingInformation: string;
-  confirmedByLicensingHolder: boolean;
+  confirmedByLicenseHolder: boolean;
+  staffNumber: string;
 }
 
 // Create a more user friendly displayable date from a date object.
@@ -117,7 +138,7 @@ const setLicenceApplicantNotificationDetails = (licenceApplicantContact: any, li
   return {
     laName: licenceApplicantContact.name,
     lhName: licenceHolderContact.name,
-    lhOrg: licenceHolderContact.organisation,
+    lhOrg: licenceHolderContact.organisation ? licenceHolderContact.organisation : 'No organisation entered',
     lhEmail: licenceHolderContact.emailAddress,
   };
 };
@@ -170,7 +191,9 @@ const setLicenceHolderMagicLinkDetails = async (
   return {
     lhName: licenceHolderContact.name,
     onBehalfName: licenceApplicantContact.name,
-    onBehalfOrg: licenceApplicantContact.organisation,
+    onBehalfOrg: licenceApplicantContact.organisation
+      ? licenceApplicantContact.organisation
+      : 'No organisation entered',
     onBehalfEmail: licenceApplicantContact.emailAddress,
     magicLink,
   };
@@ -214,6 +237,14 @@ const ApplicationController = {
     return Application.findByPk(id, {
       include: [
         {
+          model: Revocation,
+          as: 'Revocation',
+        },
+        {
+          model: Withdrawal,
+          as: 'Withdrawal',
+        },
+        {
           model: Contact,
           as: 'LicenceHolder',
         },
@@ -256,6 +287,32 @@ const ApplicationController = {
           ],
         },
         {
+          model: PermittedSpecies,
+          as: 'PermittedSpecies',
+          include: [
+            {
+              model: PermittedActivity,
+              as: 'PermittedHerringGull',
+            },
+            {
+              model: PermittedActivity,
+              as: 'PermittedBlackHeadedGull',
+            },
+            {
+              model: PermittedActivity,
+              as: 'PermittedCommonGull',
+            },
+            {
+              model: PermittedActivity,
+              as: 'PermittedGreatBlackBackedGull',
+            },
+            {
+              model: PermittedActivity,
+              as: 'PermittedLesserBlackBackedGull',
+            },
+          ],
+        },
+        {
           model: Issue,
           as: 'ApplicationIssue',
         },
@@ -266,6 +323,36 @@ const ApplicationController = {
         {
           model: Assessment,
           as: 'ApplicationAssessment',
+        },
+        {
+          model: Note,
+          as: 'ApplicationNotes',
+        },
+        {
+          model: License,
+          as: 'License',
+          include: [
+            {
+              model: LicenseAdvisory,
+              as: 'LicenseAdvisories',
+              include: [
+                {
+                  model: Advisory,
+                  as: 'Advisory',
+                },
+              ],
+            },
+            {
+              model: LicenseCondition,
+              as: 'LicenseConditions',
+              include: [
+                {
+                  model: Condition,
+                  as: 'Condition',
+                },
+              ],
+            },
+          ],
         },
       ],
     });
@@ -296,6 +383,18 @@ const ApplicationController = {
           model: Address,
           as: 'SiteAddress',
         },
+        {
+          model: License,
+          as: 'License',
+        },
+        {
+          model: Revocation,
+          as: 'Revocation',
+        },
+        {
+          model: Withdrawal,
+          as: 'Withdrawal',
+        },
       ],
     });
   },
@@ -313,6 +412,11 @@ const ApplicationController = {
    * @param {any | undefined} commonActivity The common gull activities to be licensed.
    * @param {any | undefined} greatBlackBackedActivity The great black-backed gull activities to be licensed.
    * @param {any | undefined} lesserBlackBackedActivity The lesser black-backed gull activities to be licensed.
+   * @param {any | undefined} permittedHerringActivity The herring gull activities to be licensed.
+   * @param {any | undefined} permittedBlackHeadedActivity The black-headed gull activities to be licensed.
+   * @param {any | undefined} permittedCommonActivity The common gull activities to be licensed.
+   * @param {any | undefined} permittedGreatBlackBackedActivity The great black-backed gull activities to be licensed.
+   * @param {any | undefined} permittedLesserBlackBackedActivity The lesser black-backed gull activities to be licensed.
    * @param {any | undefined} measure The measures taken / not taken details.
    * @param {any | undefined} incomingApplication The application details.
    * @param {string} confirmBaseUrl The micro-frontend we want to send the lh to to confirm their licence.
@@ -329,11 +433,23 @@ const ApplicationController = {
     commonActivity: any | undefined,
     greatBlackBackedActivity: any | undefined,
     lesserBlackBackedActivity: any | undefined,
+    permittedHerringActivity: any | undefined,
+    permittedBlackHeadedActivity: any | undefined,
+    permittedCommonActivity: any | undefined,
+    permittedGreatBlackBackedActivity: any | undefined,
+    permittedLesserBlackBackedActivity: any | undefined,
     measure: any,
     incomingApplication: any,
     confirmBaseUrl: string,
   ) => {
     const speciesIds: SpeciesIds = {
+      HerringGullId: undefined,
+      BlackHeadedGullId: undefined,
+      CommonGullId: undefined,
+      GreatBlackBackedGullId: undefined,
+      LesserBlackBackedGullId: undefined,
+    };
+    const permittedSpeciesIds: SpeciesIds = {
       HerringGullId: undefined,
       BlackHeadedGullId: undefined,
       CommonGullId: undefined,
@@ -362,38 +478,53 @@ const ApplicationController = {
       // Add any species specific activities to the DB and get their IDs.
       if (herringActivity) {
         const herringGull = await Activity.create(herringActivity, {transaction: t});
+        const permittedHerringGull = await PermittedActivity.create(permittedHerringActivity, {transaction: t});
         speciesIds.HerringGullId = herringGull.id;
+        permittedSpeciesIds.HerringGullId = permittedHerringGull.id;
       }
 
       if (blackHeadedActivity) {
         const blackHeadedGull = await Activity.create(blackHeadedActivity, {transaction: t});
+        const permittedBlackHeadedGull = await PermittedActivity.create(permittedBlackHeadedActivity, {transaction: t});
         speciesIds.BlackHeadedGullId = blackHeadedGull.id;
+        permittedSpeciesIds.BlackHeadedGullId = permittedBlackHeadedGull.id;
       }
 
       if (commonActivity) {
         const commonGull = await Activity.create(commonActivity, {transaction: t});
+        const permittedCommonGull = await PermittedActivity.create(permittedCommonActivity, {transaction: t});
         speciesIds.CommonGullId = commonGull.id;
+        permittedSpeciesIds.CommonGullId = permittedCommonGull.id;
       }
 
       if (greatBlackBackedActivity) {
         const greatBlackBackedGull = await Activity.create(greatBlackBackedActivity, {transaction: t});
+        const permittedGreatBlackBackedGull = await PermittedActivity.create(permittedGreatBlackBackedActivity, {
+          transaction: t,
+        });
         speciesIds.GreatBlackBackedGullId = greatBlackBackedGull.id;
+        permittedSpeciesIds.GreatBlackBackedGullId = permittedGreatBlackBackedGull.id;
       }
 
       if (lesserBlackBackedActivity) {
         const lesserBlackBackedGull = await Activity.create(lesserBlackBackedActivity, {transaction: t});
+        const permittedLesserBlackBackedGull = await PermittedActivity.create(permittedLesserBlackBackedActivity, {
+          transaction: t,
+        });
         speciesIds.LesserBlackBackedGullId = lesserBlackBackedGull.id;
+        permittedSpeciesIds.LesserBlackBackedGullId = permittedLesserBlackBackedGull.id;
       }
 
       // Set the species foreign keys in the DB.
       const newSpecies = await Species.create(speciesIds, {transaction: t});
-
+      const newPermittedSpecies = await PermittedSpecies.create(permittedSpeciesIds, {transaction: t});
       // Set the application's foreign keys.
       incomingApplication.LicenceHolderId = newLicenceHolderContact.id;
       incomingApplication.LicenceApplicantId = newOnBehalfContact ? newOnBehalfContact.id : newLicenceHolderContact.id;
       incomingApplication.LicenceHolderAddressId = newAddress.id;
       incomingApplication.SiteAddressId = newSiteAddress ? newSiteAddress.id : newAddress.id;
       incomingApplication.SpeciesId = newSpecies.id;
+      incomingApplication.PermittedSpeciesId = newPermittedSpecies.id;
 
       let newId; // The prospective random ID of the new application.
       let existingApplication; // Possible already assigned application.
@@ -524,6 +655,315 @@ const ApplicationController = {
 
     // If no application was confirmed return undefined.
     return undefined;
+  },
+
+  assign: async (id: number, assignTo: any) => {
+    let assign;
+    // Start the transaction.
+    await database.sequelize.transaction(async (t: transaction) => {
+      // Save the new values to the database.
+      assign = await Application.update(assignTo, {where: {id}, transaction: t});
+    });
+
+    // If all went well and we have confirmed a application return it.
+    if (assign) {
+      return assign as ApplicationInterface;
+    }
+
+    // If no application was confirmed return undefined.
+    return undefined;
+  },
+
+  /**
+   * Soft delete a application in the database (Revoke).
+   *
+   * @param {number} id A possible ID of a application.
+   * @param {object} cleanObject A new revocation object to be added to the database.
+   * @returns {boolean} True if the record is deleted, otherwise false.
+   */
+  delete: async (id: number, cleanObject: any) => {
+    try {
+      // Start the transaction.
+      await database.sequelize.transaction(async (t: transaction) => {
+        // Check the application/license exists.
+        const application = await Application.findByPk(id, {transaction: t, rejectOnEmpty: true});
+        // Find the species record.
+        const species = await Species.findByPk(application.SpeciesId, {transaction: t, rejectOnEmpty: true});
+        // Find the activities records.
+        const herringGullActivity = await Activity.findByPk(species.HerringGullId, {transaction: t});
+        if (herringGullActivity) {
+          // Soft Delete any Activity attached to the application/license.
+          await Activity.destroy({where: {id: herringGullActivity.id}, transaction: t});
+        }
+
+        const blackHeadedGullActivity = await Activity.findByPk(species.BlackHeadedGullId, {transaction: t});
+        if (blackHeadedGullActivity) {
+          // Soft Delete any Activity attached to the application/license.
+          await Activity.destroy({where: {id: blackHeadedGullActivity.id}, transaction: t});
+        }
+
+        const commonGullActivity = await Activity.findByPk(species.CommonGullId, {transaction: t});
+        if (commonGullActivity) {
+          // Soft Delete any Activity attached to the application/license.
+          await Activity.destroy({where: {id: commonGullActivity.id}, transaction: t});
+        }
+
+        const greatBlackBackedGullActivity = await Activity.findByPk(species.GreatBlackBackedGullId, {transaction: t});
+        if (greatBlackBackedGullActivity) {
+          // Soft Delete any Activity attached to the application/license.
+          await Activity.destroy({where: {id: greatBlackBackedGullActivity.id}, transaction: t});
+        }
+
+        const lesserBlackBackedGullActivity = await Activity.findByPk(species.LesserBlackBackedGullId, {
+          transaction: t,
+        });
+        if (lesserBlackBackedGullActivity) {
+          // Soft Delete any Activity attached to the application/license.
+          await Activity.destroy({where: {id: lesserBlackBackedGullActivity.id}, transaction: t});
+        }
+
+        // Soft Delete any species record attached to the application/license.
+        await Species.destroy({where: {id: species.id}, transaction: t});
+
+        // Find the permitted species record.
+        const permittedSpecies = await PermittedSpecies.findByPk(application.PermittedSpeciesId, {
+          transaction: t,
+          rejectOnEmpty: true,
+        });
+
+        // Find the permitted activities records.
+        const permittedHerringGullActivity = await PermittedActivity.findByPk(permittedSpecies.HerringGullId, {
+          transaction: t,
+        });
+        if (permittedHerringGullActivity) {
+          // Soft Delete any PermittedActivity attached to the application/license.
+          await PermittedActivity.destroy({where: {id: permittedHerringGullActivity.id}, transaction: t});
+        }
+
+        const permittedBlackHeadedGullActivity = await PermittedActivity.findByPk(permittedSpecies.BlackHeadedGullId, {
+          transaction: t,
+        });
+        if (permittedBlackHeadedGullActivity) {
+          // Soft Delete any PermittedActivity attached to the application/license.
+          await PermittedActivity.destroy({where: {id: permittedBlackHeadedGullActivity.id}, transaction: t});
+        }
+
+        const permittedCommonGullActivity = await PermittedActivity.findByPk(permittedSpecies.CommonGullId, {
+          transaction: t,
+        });
+        if (permittedCommonGullActivity) {
+          // Soft Delete any PermittedActivity attached to the application/license.
+          await PermittedActivity.destroy({where: {id: permittedCommonGullActivity.id}, transaction: t});
+        }
+
+        const permittedGreatBlackBackedGullActivity = await PermittedActivity.findByPk(
+          permittedSpecies.GreatBlackBackedGullId,
+          {transaction: t},
+        );
+        if (permittedGreatBlackBackedGullActivity) {
+          // Soft Delete any PermittedActivity attached to the application/license.
+          await PermittedActivity.destroy({where: {id: permittedGreatBlackBackedGullActivity.id}, transaction: t});
+        }
+
+        const permittedLesserBlackBackedGullActivity = await PermittedActivity.findByPk(
+          permittedSpecies.LesserBlackBackedGullId,
+          {transaction: t},
+        );
+        if (permittedLesserBlackBackedGullActivity) {
+          // Soft Delete any PermittedActivity attached to the application/license.
+          await PermittedActivity.destroy({where: {id: permittedLesserBlackBackedGullActivity.id}, transaction: t});
+        }
+
+        // Soft Delete any Permitted species record attached to the application/license.
+        await PermittedSpecies.destroy({where: {id: permittedSpecies.id}, transaction: t});
+
+        // Soft Delete any Contact attached to the application/license.
+        await Contact.destroy({where: {id: application.LicenceHolderId}, transaction: t});
+        await Contact.destroy({where: {id: application.LicenceApplicantId}, transaction: t});
+        // Soft Delete any Address attached to the application/license.
+        await Address.destroy({where: {id: application.LicenceHolderAddressId}, transaction: t});
+        await Address.destroy({where: {id: application.SiteAddressId}, transaction: t});
+        // Soft delete any Measure or Issue attached to the application/license.
+        await Measure.destroy({where: {ApplicationId: id}, transaction: t});
+        await Issue.destroy({where: {ApplicationId: id}, transaction: t});
+        // Soft delete the assessment attached to the application/license.
+        await Assessment.destroy({where: {ApplicationId: id}, transaction: t});
+        // Soft delete any advisories or conditions attached to the application/license.
+        await LicenseAdvisory.destroy({where: {LicenseId: id}, transaction: t});
+        await LicenseCondition.destroy({where: {LicenseId: id}, transaction: t});
+        // Soft delete the License attached to the application.
+        await License.destroy({where: {ApplicationId: id}, transaction: t});
+        // Create the revocation entry.
+        await Revocation.create(cleanObject, {transaction: t});
+        // Soft Delete the Application/License.
+        await Application.destroy({where: {id}, transaction: t});
+        // If everything worked then return true.
+        return true;
+      });
+      // Everything worked so return true to the calling code.
+      return true;
+    } catch {
+      // If something went wrong during the transaction return false.
+      return false;
+    }
+  },
+
+  /**
+   * Deletes a application in the database (Withdraw).
+   *
+   * @param {number} id A possible ID of a application.
+   * @param {object} cleanObject A new revocation object to be added to the database.
+   * @returns {boolean} True if the record is deleted, otherwise false.
+   */
+  withdraw: async (id: number, cleanObject: any) => {
+    try {
+      // Start the transaction.
+      await database.sequelize.transaction(async (t: transaction) => {
+        // Check the application/license exists.
+        const application = await Application.findByPk(id, {transaction: t, rejectOnEmpty: true});
+        // Find the species record.
+        const species = await Species.findByPk(application.SpeciesId, {transaction: t, rejectOnEmpty: true});
+        // Find the permitted species record.
+        const permittedSpecies = await PermittedSpecies.findByPk(application.PermittedSpeciesId, {
+          transaction: t,
+          rejectOnEmpty: true,
+        });
+
+        // Create a new object that contains only null values to save into the database.
+        const nullApp = {
+          LicenceHolderId: null,
+          LicenceApplicantId: null,
+          LicenceHolderAddressId: null,
+          SiteAddressId: null,
+          SpeciesId: null,
+          isResidentialSite: null,
+          siteType: null,
+          previousLicenceNumber: null,
+          supportingInformation: null,
+          confirmedByLicenseHolder: null,
+          previousLicence: null,
+          PermittedSpeciesId: null,
+          staffNumber: null,
+        };
+        // Set all values to NULL so we can delete all attached records.
+        await Application.update(nullApp, {where: {id}, transaction: t});
+        // Create the revocation entry.
+        await Withdrawal.create(cleanObject, {transaction: t});
+
+        // Delete any species record attached to the application/license.
+        await Species.destroy({where: {id: species.id}, force: true, transaction: t});
+        // Delete any PermittedSpecies record attached to the application/license.
+        await PermittedSpecies.destroy({where: {id: permittedSpecies.id}, force: true, transaction: t});
+
+        // Find the activities records.
+        const herringGullActivity = await Activity.findByPk(species.HerringGullId, {transaction: t});
+        if (herringGullActivity) {
+          // Delete any Activity record attached to the application/license.
+          await Activity.destroy({where: {id: herringGullActivity.id}, force: true, transaction: t});
+        }
+
+        const blackHeadedGullActivity = await Activity.findByPk(species.BlackHeadedGullId, {transaction: t});
+        if (blackHeadedGullActivity) {
+          // Delete any Activity record attached to the application/license.
+          await Activity.destroy({where: {id: blackHeadedGullActivity.id}, force: true, transaction: t});
+        }
+
+        const commonGullActivity = await Activity.findByPk(species.CommonGullId, {transaction: t});
+        if (commonGullActivity) {
+          // Delete any Activity record attached to the application/license.
+          await Activity.destroy({where: {id: commonGullActivity.id}, force: true, transaction: t});
+        }
+
+        const greatBlackBackedGullActivity = await Activity.findByPk(species.GreatBlackBackedGullId, {transaction: t});
+        if (greatBlackBackedGullActivity) {
+          // Delete any Activity record attached to the application/license.
+          await Activity.destroy({where: {id: greatBlackBackedGullActivity.id}, force: true, transaction: t});
+        }
+
+        const lesserBlackBackedGullActivity = await Activity.findByPk(species.LesserBlackBackedGullId, {
+          transaction: t,
+        });
+        if (lesserBlackBackedGullActivity) {
+          // Delete any Activity record attached to the application/license.
+          await Activity.destroy({where: {id: lesserBlackBackedGullActivity.id}, force: true, transaction: t});
+        }
+
+        // Find the permitted activities records.
+        const permittedHerringGullActivity = await PermittedActivity.findByPk(permittedSpecies.HerringGullId, {
+          transaction: t,
+        });
+        if (permittedHerringGullActivity) {
+          // Delete any PermittedActivity record attached to the application/license.
+          await PermittedActivity.destroy({where: {id: permittedHerringGullActivity.id}, force: true, transaction: t});
+        }
+
+        const permittedBlackHeadedGullActivity = await PermittedActivity.findByPk(permittedSpecies.BlackHeadedGullId, {
+          transaction: t,
+        });
+        if (permittedBlackHeadedGullActivity) {
+          // Delete any PermittedActivity record attached to the application/license.
+          await PermittedActivity.destroy({
+            where: {id: permittedBlackHeadedGullActivity.id},
+            force: true,
+            transaction: t,
+          });
+        }
+
+        const permittedCommonGullActivity = await PermittedActivity.findByPk(permittedSpecies.CommonGullId, {
+          transaction: t,
+        });
+        if (permittedCommonGullActivity) {
+          // Delete any PermittedActivity record attached to the application/license.
+          await PermittedActivity.destroy({where: {id: permittedCommonGullActivity.id}, force: true, transaction: t});
+        }
+
+        const permittedGreatBlackBackedGullActivity = await PermittedActivity.findByPk(
+          permittedSpecies.GreatBlackBackedGullId,
+          {transaction: t},
+        );
+        if (permittedGreatBlackBackedGullActivity) {
+          // Delete any PermittedActivity record attached to the application/license.
+          await PermittedActivity.destroy({
+            where: {id: permittedGreatBlackBackedGullActivity.id},
+            force: true,
+            transaction: t,
+          });
+        }
+
+        const permittedLesserBlackBackedGullActivity = await PermittedActivity.findByPk(
+          permittedSpecies.LesserBlackBackedGullId,
+          {transaction: t},
+        );
+        if (permittedLesserBlackBackedGullActivity) {
+          // Delete any PermittedActivity record attached to the application/license.
+          await PermittedActivity.destroy({
+            where: {id: permittedLesserBlackBackedGullActivity.id},
+            force: true,
+            transaction: t,
+          });
+        }
+
+        // Delete any Contacts attached to the application/license.
+        await Contact.destroy({where: {id: application.LicenceHolderId}, force: true, transaction: t});
+        await Contact.destroy({where: {id: application.LicenceApplicantId}, force: true, transaction: t});
+        // Delete any Address attached to the application/license.
+        await Address.destroy({where: {id: application.LicenceHolderAddressId}, force: true, transaction: t});
+        await Address.destroy({where: {id: application.SiteAddressId}, force: true, transaction: t});
+        // Delete any Measure or Issue attached to the application/license.
+        await Measure.destroy({where: {ApplicationId: id}, force: true, transaction: t});
+        await Issue.destroy({where: {ApplicationId: id}, force: true, transaction: t});
+        // Delete the assessment attached to the application/license.
+        await Assessment.destroy({where: {ApplicationId: id}, force: true, transaction: t});
+
+        // If everything worked then return true.
+        return true;
+      });
+      // Everything worked so return true to the calling code.
+      return true;
+    } catch {
+      // If something went wrong during the transaction return false.
+      return false;
+    }
   },
 };
 
