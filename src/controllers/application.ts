@@ -60,6 +60,7 @@ interface ApplicationInterface {
   supportingInformation: string;
   confirmedByLicenseHolder: boolean;
   staffNumber: string;
+  fourteenDayReminder: boolean;
 }
 
 // Create a more user friendly displayable date from a date object.
@@ -125,10 +126,7 @@ const setHolderApplicantConfirmEmailDetails = (
     lhName: licenceHolderContact.name,
     laName: onBehalfContact.name,
     applicationDate: createDisplayDate(new Date(createdAt)),
-    siteAddressLine1: siteAddress.addressLine1,
-    siteAddressLine2: siteAddress.addressLine2,
-    siteAddressTown: siteAddress.addressTown,
-    sitePostcode: siteAddress.postcode,
+    siteAddress: createSummaryAddress(siteAddress),
     id,
   };
 };
@@ -264,6 +262,7 @@ const sendHolderApplicantConfirmEmail = async (emailDetails: any, emailAddress: 
 const ApplicationController = {
   findOne: async (id: number) => {
     return Application.findByPk(id, {
+      paranoid: false,
       include: [
         {
           model: Revocation,
@@ -276,108 +275,133 @@ const ApplicationController = {
         {
           model: Contact,
           as: 'LicenceHolder',
+          paranoid: false,
         },
         {
           model: Contact,
           as: 'LicenceApplicant',
+          paranoid: false,
         },
         {
           model: Address,
           as: 'LicenceHolderAddress',
+          paranoid: false,
         },
         {
           model: Address,
           as: 'SiteAddress',
+          paranoid: false,
         },
         {
           model: Species,
           as: 'Species',
+          paranoid: false,
           include: [
             {
               model: Activity,
               as: 'HerringGull',
+              paranoid: false,
             },
             {
               model: Activity,
               as: 'BlackHeadedGull',
+              paranoid: false,
             },
             {
               model: Activity,
               as: 'CommonGull',
+              paranoid: false,
             },
             {
               model: Activity,
               as: 'GreatBlackBackedGull',
+              paranoid: false,
             },
             {
               model: Activity,
               as: 'LesserBlackBackedGull',
+              paranoid: false,
             },
           ],
         },
         {
           model: PSpecies,
           as: 'PSpecies',
+          paranoid: false,
           include: [
             {
               model: PActivity,
               as: 'PHerringGull',
+              paranoid: false,
             },
             {
               model: PActivity,
               as: 'PBlackHeadedGull',
+              paranoid: false,
             },
             {
               model: PActivity,
               as: 'PCommonGull',
+              paranoid: false,
             },
             {
               model: PActivity,
               as: 'PGreatBlackBackedGull',
+              paranoid: false,
             },
             {
               model: PActivity,
               as: 'PLesserBlackBackedGull',
+              paranoid: false,
             },
           ],
         },
         {
           model: Issue,
           as: 'ApplicationIssue',
+          paranoid: false,
         },
         {
           model: Measure,
           as: 'ApplicationMeasure',
+          paranoid: false,
         },
         {
           model: Assessment,
           as: 'ApplicationAssessment',
+          paranoid: false,
         },
         {
           model: Note,
           as: 'ApplicationNotes',
+          paranoid: false,
         },
         {
           model: License,
           as: 'License',
+          paranoid: false,
           include: [
             {
               model: LicenseAdvisory,
               as: 'LicenseAdvisories',
+              paranoid: false,
               include: [
                 {
                   model: Advisory,
                   as: 'Advisory',
+                  paranoid: false,
                 },
               ],
             },
             {
               model: LicenseCondition,
               as: 'LicenseConditions',
+              paranoid: false,
               include: [
                 {
                   model: Condition,
                   as: 'Condition',
+                  paranoid: false,
                 },
               ],
             },
@@ -399,6 +423,7 @@ const ApplicationController = {
    */
   findAllSummary: async () => {
     return Application.findAll({
+      paranoid: false,
       include: [
         {
           model: Contact,
@@ -677,6 +702,23 @@ const ApplicationController = {
     }
 
     // If no application was confirmed return undefined.
+    return undefined;
+  },
+
+  remind: async (id: number, remindApplication: ApplicationInterface) => {
+    let remindedApplication;
+    // Start the transaction.
+    await database.sequelize.transaction(async (t: transaction) => {
+      // Save the new values to the database.
+      remindedApplication = await Application.update(remindApplication, {where: {id}, transaction: t});
+    });
+
+    // If all went well and we have flagged an application as reminded then return the application.
+    if (remindedApplication) {
+      return remindedApplication as ApplicationInterface;
+    }
+
+    // If no application was reminded return undefined.
     return undefined;
   },
 
