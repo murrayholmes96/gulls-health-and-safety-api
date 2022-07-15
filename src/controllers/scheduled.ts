@@ -1,9 +1,10 @@
 import * as jwt from 'jsonwebtoken';
-
+import {Op} from 'sequelize';
 import jwk from '../config/jwk.js';
 import database from '../models/index.js';
-
 import config from '../config/app';
+import MultiUseFunctions from '../multi-use-functions';
+import LicenceController from './license';
 import {ApplicationInterface} from './application.js';
 
 // Disabled rules because Notify client has no index.js and implicitly has "any" type, and this is how the import is done
@@ -11,31 +12,7 @@ import {ApplicationInterface} from './application.js';
 /* eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports, unicorn/prefer-module, prefer-destructuring */
 const NotifyClient = require('notifications-node-client').NotifyClient;
 
-const {Application, Contact, Address} = database;
-
-/**
- * This function returns a summary address built from the address fields of an address object.
- *
- * @param {any} fullAddress The address to use to build the summary address from.
- * @returns {string} Returns a string containing the summary address.
- */
-const createSummaryAddress = (fullAddress: any): string => {
-  const address = [];
-  address.push(fullAddress.addressLine1.trim());
-  // As addressLine2 is optional we need to check if it exists.
-  if (fullAddress.addressLine2) {
-    address.push(fullAddress.addressLine2.trim());
-  }
-
-  address.push(fullAddress.addressTown.trim(), fullAddress.addressCounty.trim(), fullAddress.postcode.trim());
-
-  return address.join(', ');
-};
-
-// Create a more user friendly displayable date from a date object, format (dd/mm/yyy).
-const createDisplayDate = (date: Date) => {
-  return date.toLocaleDateString('en-GB', {year: 'numeric', month: 'numeric', day: 'numeric'});
-};
+const {Application, Contact, Address, License, Revocation} = database;
 
 /**
  * This function calls the Notify API and asks for a 14 day reminder email to be sent to
@@ -123,11 +100,11 @@ const set14DayReminderEmailDetails = async (
 
   return {
     lhName: licenceHolderContact.name,
-    applicationDate: createDisplayDate(new Date(applicationDate)),
+    applicationDate: MultiUseFunctions.createShortDisplayDate(new Date(applicationDate)),
     onBehalfName: onBehalfContact.name,
     onBehalfOrg: onBehalfContact.organisation ? onBehalfContact.organisation : 'No organisation provided',
     onBehalfEmail: onBehalfContact.emailAddress,
-    siteAddress: createSummaryAddress(siteAddress),
+    siteAddress: MultiUseFunctions.createSummaryAddress(siteAddress),
     magicLink,
     id,
   };
@@ -142,11 +119,11 @@ const set14DayReminderEmailDetailsForApplicant = async (
 ) => {
   return {
     lhName: licenceHolderContact.name,
-    applicationDate: createDisplayDate(new Date(applicationDate)),
+    applicationDate: MultiUseFunctions.createShortDisplayDate(new Date(applicationDate)),
     laName: onBehalfContact.name,
     lhOrg: licenceHolderContact.organisation ? licenceHolderContact.organisation : 'No organisation provided',
     lhEmail: licenceHolderContact.emailAddress,
-    siteAddress: createSummaryAddress(siteAddress),
+    siteAddress: MultiUseFunctions.createSummaryAddress(siteAddress),
     id,
   };
 };
@@ -161,8 +138,8 @@ const set21DayWithdrawEmailDetails = (
   return {
     lhName: licenceHolderContact.name,
     onBehalfName: onBehalfContact.name,
-    applicationDate: createDisplayDate(new Date(applicationDate)),
-    siteAddress: createSummaryAddress(siteAddress),
+    applicationDate: MultiUseFunctions.createShortDisplayDate(new Date(applicationDate)),
+    siteAddress: MultiUseFunctions.createSummaryAddress(siteAddress),
     id,
   };
 };
@@ -211,6 +188,31 @@ const ScheduledController = {
         {
           model: Address,
           as: 'SiteAddress',
+        },
+      ],
+    });
+  },
+
+  /**
+   * Gets all applications submitted before the 20th May 2022.
+   *
+   * @returns {Application[]} A collection of all applications submitted before 20th May 2022.
+   */
+  getPreTest3Applications: async () => {
+    return Application.findAll({
+      where: {
+        createdAt: {
+          [Op.lt]: new Date('2022-05-20 00:00:01.001 +00:00'),
+        },
+      },
+      include: [
+        {
+          model: Revocation,
+          as: 'Revocation',
+        },
+        {
+          model: License,
+          as: 'License',
         },
       ],
     });
@@ -283,6 +285,25 @@ const ScheduledController = {
 
     // Return the unconfirmed array of applications or undefined if empty.
     return unconfirmed ? (unconfirmed as ApplicationInterface[]) : undefined;
+  },
+
+  /**
+   * This function will call the LicenceController's reSendEmails function to re-issue licences.
+   *
+   * @param {any} licences The collection of licenses to be re-issued.
+   * @returns {number} Returns the count of licences re-issued.
+   */
+  resendLicenceEmails: async (licences: any): Promise<number> => {
+    let sentCount = 0;
+
+    /* eslint-disable no-await-in-loop */
+    for (const licence of licences) {
+      await LicenceController.reSendEmails(licence.id);
+      sentCount++;
+    }
+    /* eslint-enable no-await-in-loop */
+
+    return sentCount;
   },
 };
 

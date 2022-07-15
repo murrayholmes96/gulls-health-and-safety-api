@@ -3,7 +3,9 @@ import database from '../models/index.js';
 import config from '../config/app';
 import {AdvisoryInterface} from '../models/advisory.js';
 import {ConditionInterface} from '../models/condition.js';
-
+import MultiUseFunctions from '../multi-use-functions';
+import AdvisoryController from './advisory';
+import ConditionController from './condition';
 import Application from './application';
 
 const {License, LicenseCondition, LicenseAdvisory, Advisory, Condition} = database;
@@ -30,15 +32,17 @@ interface LicenseInterface {
  * @param {any} licence The licence details.
  * @returns {any} Returns a personalisation shaped object for notify.
  */
-const setLicenceNotificationDetails = (application: any, licence: any) => {
+const setLicenceNotificationDetails = async (application: any, licence: any): Promise<any> => {
+  const measuresToContinue = createAdditionalMeasures(application?.AssessmentMeasure, 'Continue');
+  const additionalMeasuresIntended = createAdditionalMeasures(application?.AssessmentMeasure, 'Intend');
   return {
     licenceNumber: application.id,
     siteAddressLine1: application.SiteAddress.addressLine1,
     siteAddressLine2: application.SiteAddress.addressLine2 ? application.SiteAddress.addressLine2 : 'No address line 2',
     siteAddressTown: application.SiteAddress.addressTown,
     sitePostcode: application.SiteAddress.postcode,
-    dateFrom: createDisplayDate(new Date(licence.periodFrom)),
-    dateTo: createDisplayDate(new Date(licence.periodTo)),
+    dateFrom: MultiUseFunctions.createShortDisplayDate(new Date(licence.periodFrom)),
+    dateTo: MultiUseFunctions.createShortDisplayDate(new Date(licence.periodTo)),
     lhName: application.LicenceHolder.name,
     addressLine1: application.LicenceHolderAddress.addressLine1,
     addressLine2: application.LicenceHolderAddress.addressLine2
@@ -52,15 +56,23 @@ const setLicenceNotificationDetails = (application: any, licence: any) => {
     measuresTried: createMeasures(application.ApplicationMeasure, 'Tried'),
     measuresIntended: createMeasures(application.ApplicationMeasure, 'Intend'),
     measuresNotTried: createMeasures(application.ApplicationMeasure, 'No'),
+    measuresToContinue,
+    additionalMeasuresIntended,
+    displayContinue: measuresToContinue !== '',
+    displayAdditionalIntended: additionalMeasuresIntended !== '',
+    appliedForSpecies: createAppliedFor(application.Species),
     proposalResult: createProposalResult(application.PSpecies),
-    optionalAdvisoriesList: createOptionalAdvisoriesList(application.License.LicenseAdvisories),
-    optionalWhatYouMustDoConditionsList: createWhatYouMustDoOptionalConditionsList(
+    optionalAdvisoriesList: await createOptionalAdvisoriesList(application.License.LicenseAdvisories),
+    optionalWhatYouMustDoConditionsList: await createWhatYouMustDoOptionalConditionsList(
       application.License.LicenseConditions,
     ),
-    optionalGeneralConditionsList: createGeneralOptionalConditionsList(application.License.LicenseConditions),
-    optionalReportingConditionsList: createReportingOptionalConditionsList(application.License.LicenseConditions),
+    optionalGeneralConditionsList: await createGeneralOptionalConditionsList(application.License.LicenseConditions),
+    optionalReportingConditionsList: await createReportingOptionalConditionsList(application.License.LicenseConditions),
     test1Details: application.ApplicationAssessment.testOneAssessment,
     test2Details: application.ApplicationAssessment.testTwoAssessment,
+    test3Details: application.ApplicationAssessment.testThreeAssessment
+      ? application.ApplicationAssessment.testThreeAssessment
+      : '',
   };
 };
 
@@ -73,16 +85,11 @@ const setLicenceNotificationDetails = (application: any, licence: any) => {
 const sendLicenceNotificationEmail = async (emailDetails: any, emailAddress: any) => {
   if (config.notifyApiKey) {
     const notifyClient = new NotifyClient(config.notifyApiKey);
-    await notifyClient.sendEmail('82e220c4-4534-4da1-940b-353883e5dbab', emailAddress, {
+    await notifyClient.sendEmail('8d995630-dd7b-4bb9-9678-1ad921e70e22', emailAddress, {
       personalisation: emailDetails,
       emailReplyToId: '4b49467e-2a35-4713-9d92-809c55bf1cdd',
     });
   }
-};
-
-// Create a more user friendly displayable date from a date object, format (dd/mm/yyy).
-const createDisplayDate = (date: Date) => {
-  return date.toLocaleDateString('en-GB', {year: 'numeric', month: 'numeric', day: 'numeric'});
 };
 
 /**
@@ -158,7 +165,7 @@ const addActivities = (species: any, speciesType: string): string => {
   const activities: string[] = [];
   if (species.removeNests) {
     activities.push(
-      `${speciesType}: To remove ${displayableRanges(
+      `${speciesType}: To take and destroy ${displayableRanges(
         species.quantityNestsToRemove,
       )} nests and any eggs they contain by hand.`,
     );
@@ -166,28 +173,42 @@ const addActivities = (species: any, speciesType: string): string => {
 
   if (species.eggDestruction) {
     activities.push(
-      `${speciesType}: To destroy eggs by oiling, pricking or replacing with dummy eggs from ${displayableRanges(
+      `${speciesType}: To take and destroy eggs from ${displayableRanges(
         species.quantityNestsWhereEggsDestroyed,
-      )} nests.`,
+      )} nests by oiling, pricking or replacing with dummy eggs.`,
     );
   }
 
   if (species.chicksToRescueCentre) {
     activities.push(
-      `${speciesType}: To take ${String(species.quantityChicksToRescue)} chicks to a wildlife rescue centre.`,
+      `${speciesType}: To take ${String(
+        species.quantityChicksToRescue,
+      )} chicks to a wildlife rescue centre by hand, net or trap.`,
     );
   }
 
   if (species.chicksRelocateNearby) {
-    activities.push(`${speciesType}: To take ${String(species.quantityChicksToRelocate)} chicks and relocate nearby.`);
+    activities.push(
+      `${speciesType}: To take ${String(
+        species.quantityChicksToRelocate,
+      )} chicks and relocate nearby by hand, net or trap.`,
+    );
   }
 
   if (species.killChicks) {
-    activities.push(`${speciesType}: To kill ${String(species.quantityChicksToKill)} chicks.`);
+    activities.push(
+      `${speciesType}: To kill up to ${String(
+        species.quantityChicksToKill,
+      )} chicks by shooting or by hand, net or trap.`,
+    );
   }
 
   if (species.killAdults) {
-    activities.push(`${speciesType}: To kill ${String(species.quantityAdultsToKill)} adults.`);
+    activities.push(
+      `${speciesType}: To kill up to ${String(
+        species.quantityAdultsToKill,
+      )} adults by shooting, falconry or by hand, net or trap.`,
+    );
   }
 
   return activities.join('\n');
@@ -312,7 +333,84 @@ const createMeasures = (applicationMeasures: any, measuresStatus: string): strin
     return measures.join('\n');
   }
 
-  return '* Nothing';
+  return '* Nothing selected by applicant';
+};
+
+/**
+ * This function returns a list of measures, either tried, intended to be tried, or not intended
+ * to be tried, formatted as bullet points for the notify API.
+ *
+ * @param {any} applicationMeasures The list of measures.
+ * @param {string} measuresStatus Either `Tried`, `Intend` or `No`.
+ * @returns {string} Returns a formatted list of bullet pointed measures.
+ */
+const createAdditionalMeasures = (applicationMeasures: any, measuresStatus: string): string => {
+  const measures: string[] = [];
+
+  if (applicationMeasures?.preventNesting === measuresStatus) {
+    measures.push('* Physically preventing nesting');
+  }
+
+  if (applicationMeasures?.removeOldNests === measuresStatus) {
+    measures.push('* Removing old nests and potential nesting material');
+  }
+
+  if (applicationMeasures?.removeLitter === measuresStatus) {
+    measures.push('* Removing or preventing access to attractants such as litter and food waste');
+  }
+
+  if (applicationMeasures?.humanDisturbance === measuresStatus) {
+    measures.push('* Human disturbance');
+  }
+
+  if (applicationMeasures?.scaringDevices === measuresStatus) {
+    measures.push('* Scaring devices - static or automatic');
+  }
+
+  if (applicationMeasures?.hawking === measuresStatus) {
+    measures.push('* Hawking by birds of prey');
+  }
+
+  if (applicationMeasures?.disturbanceByDogs === measuresStatus) {
+    measures.push('* Disturbance by dogs');
+  }
+
+  if (measures.length > 0) {
+    return measures.join('\n');
+  }
+
+  return '';
+};
+
+/**
+ * This function creates a list of the applied for licence activities results.
+ *
+ * @param {any} species The species and activities which the licence will pertain to.
+ * @returns {string} Returns a list of the applied for licence activities results, formatted for the Notify API.
+ */
+const createAppliedFor = (species: any): string => {
+  const proposalResult = [];
+  if (species.HerringGullId) {
+    proposalResult.push(addActivityResults(species.HerringGull, 'Herring gull'));
+  }
+
+  if (species.BlackHeadedGullId) {
+    proposalResult.push(addActivityResults(species.BlackHeadedGull, 'Black-headed gull'));
+  }
+
+  if (species.CommonGullId) {
+    proposalResult.push(addActivityResults(species.CommonGull, 'Common gull'));
+  }
+
+  if (species.GreatBlackBackedGullId) {
+    proposalResult.push(addActivityResults(species.GreatBlackBackedGull, 'Great black-backed gull'));
+  }
+
+  if (species.LesserBlackBackedGullId) {
+    proposalResult.push(addActivityResults(species.LesserBlackBackedGull, 'Lesser black-backed gull'));
+  }
+
+  return proposalResult.join('\n');
 };
 
 /**
@@ -324,23 +422,23 @@ const createMeasures = (applicationMeasures: any, measuresStatus: string): strin
 const createProposalResult = (species: any): string => {
   const proposalResult = [];
   if (species.HerringGullId) {
-    proposalResult.push(addProposalResults(species.PHerringGull, 'Herring gull'));
+    proposalResult.push(addActivityResults(species.PHerringGull, 'Herring gull'));
   }
 
   if (species.BlackHeadedGullId) {
-    proposalResult.push(addProposalResults(species.PBlackHeadedGull, 'Black-headed gull'));
+    proposalResult.push(addActivityResults(species.PBlackHeadedGull, 'Black-headed gull'));
   }
 
   if (species.CommonGullId) {
-    proposalResult.push(addProposalResults(species.PCommonGull, 'Common gull'));
+    proposalResult.push(addActivityResults(species.PCommonGull, 'Common gull'));
   }
 
   if (species.GreatBlackBackedGullId) {
-    proposalResult.push(addProposalResults(species.PGreatBlackBackedGull, 'Great black-backed gull'));
+    proposalResult.push(addActivityResults(species.PGreatBlackBackedGull, 'Great black-backed gull'));
   }
 
   if (species.LesserBlackBackedGullId) {
-    proposalResult.push(addProposalResults(species.PLesserBlackBackedGull, 'Lesser black-backed gull'));
+    proposalResult.push(addActivityResults(species.PLesserBlackBackedGull, 'Lesser black-backed gull'));
   }
 
   return proposalResult.join('\n');
@@ -354,34 +452,54 @@ const createProposalResult = (species: any): string => {
  * @returns {string} Returns a list of proposal results for a given species, formatted as bullet
  * points for the Notify API.
  */
-const addProposalResults = (species: any, speciesType: string): string => {
+const addActivityResults = (species: any, speciesType: string): string => {
   const proposalResults: string[] = [];
   if (species.removeNests) {
-    proposalResults.push(`* ${speciesType} - ${displayableRanges(species.quantityNestsToRemove)} nests removed.`);
+    proposalResults.push(
+      `* ${speciesType}: To take and destroy ${displayableRanges(
+        species.quantityNestsToRemove,
+      )} nests and any eggs they contain by hand.`,
+    );
   }
 
   if (species.eggDestruction) {
     proposalResults.push(
-      `* ${speciesType} - ${displayableRanges(species.quantityNestsWhereEggsDestroyed)} eggs destroyed.`,
+      `* ${speciesType}: To take and destroy eggs from ${displayableRanges(
+        species.quantityNestsWhereEggsDestroyed,
+      )} nests by oiling, pricking or replacing with dummy eggs.`,
     );
   }
 
   if (species.chicksToRescueCentre) {
     proposalResults.push(
-      `* ${speciesType} - ${String(species.quantityChicksToRescue)} chicks taken to a wildlife rescue centre.`,
+      `* ${speciesType}: To take ${String(
+        species.quantityChicksToRescue,
+      )} chicks to a wildlife rescue centre by hand, net or trap.`,
     );
   }
 
   if (species.chicksRelocateNearby) {
-    proposalResults.push(`* ${speciesType} - ${String(species.quantityChicksToRelocate)} chicks relocated nearby.`);
+    proposalResults.push(
+      `* ${speciesType}: To take ${String(
+        species.quantityChicksToRelocate,
+      )} chicks and relocate nearby by hand, net or trap.`,
+    );
   }
 
   if (species.killChicks) {
-    proposalResults.push(`* ${speciesType} - ${String(species.quantityChicksToKill)} chicks killed.`);
+    proposalResults.push(
+      `* ${speciesType}: To kill up to ${String(
+        species.quantityChicksToKill,
+      )} chicks by shooting or by hand, net or trap.`,
+    );
   }
 
   if (species.killAdults) {
-    proposalResults.push(`* ${speciesType} - ${String(species.quantityAdultsToKill)} adults killed.`);
+    proposalResults.push(
+      `* ${speciesType}: To kill up to ${String(
+        species.quantityAdultsToKill,
+      )} adults by shooting, falconry or by hand, net or trap.`,
+    );
   }
 
   return proposalResults.join('\n');
@@ -393,18 +511,30 @@ const addProposalResults = (species: any, speciesType: string): string => {
  * @param {any} advisories The list of advisories associated with the licence.
  * @returns {string} Returns a formatted list of optional advisories.
  */
-const createOptionalAdvisoriesList = (advisories: any): string => {
-  const optionalAdvisoryIds = new Set([1, 2, 7]);
+const createOptionalAdvisoriesList = async (advisories: any): Promise<string> => {
+  // Get all optional advisories from the database.
+  const allOptionalAdvisories = await AdvisoryController.findAllOptional();
+
+  const optionalAdvisoryIds = new Set();
+
+  // Add the advisory IDs to a set.
+  for (const advisory of allOptionalAdvisories) {
+    optionalAdvisoryIds.add(advisory.id);
+  }
 
   const advisoryList = [];
 
+  // Filter the advisories to get the ones we want.
   const optionalAdvisories = advisories.filter((optional: any) => {
     return optionalAdvisoryIds.has(optional.Advisory.id);
   });
+
+  // Create an array of advisories.
   for (const advisory of optionalAdvisories) {
     advisoryList.push(advisory.Advisory.advisory);
   }
 
+  // Join the advisories together with an escaped newline.
   return advisoryList.join('\n\n');
 };
 
@@ -414,18 +544,35 @@ const createOptionalAdvisoriesList = (advisories: any): string => {
  * @param {any} conditions The list of conditions associated with the licence.
  * @returns {string} Returns a formatted list of optional general conditions.
  */
-const createGeneralOptionalConditionsList = (conditions: any): string => {
-  const optionalGeneralConditionIds = new Set([12, 13]);
+const createGeneralOptionalConditionsList = async (conditions: any): Promise<string> => {
+  // Get all optional conditions from the database.
+  const allOptionalConditions = await ConditionController.findAllOptional();
+
+  // Filter so we only have `General` conditions.
+  const allOptionalGeneralConditions = allOptionalConditions.filter((condition) => {
+    return condition.category === 'General';
+  });
+
+  const optionalGeneralConditionIds = new Set();
+
+  // Add the condition IDs to a set.
+  for (const condition of allOptionalGeneralConditions) {
+    optionalGeneralConditionIds.add(condition.id);
+  }
 
   const conditionList = [];
 
+  // Filter the conditions to get the ones we want.
   const optionalConditions = conditions.filter((optional: any) => {
     return optionalGeneralConditionIds.has(optional.Condition.id);
   });
+
+  // Create an array of conditions.
   for (const condition of optionalConditions) {
     conditionList.push(condition.Condition.condition);
   }
 
+  // Join the conditions together with an escaped newline.
   return conditionList.join('\n\n');
 };
 
@@ -435,18 +582,35 @@ const createGeneralOptionalConditionsList = (conditions: any): string => {
  * @param {any} conditions The list of conditions associated with the licence.
  * @returns {string} Returns a formatted list of optional what you must do conditions.
  */
-const createWhatYouMustDoOptionalConditionsList = (conditions: any): string => {
-  const optionalWhatMustBeDoneConditionIds = new Set([4, 6, 7]);
+const createWhatYouMustDoOptionalConditionsList = async (conditions: any): Promise<string> => {
+  // Get all optional conditions from the database.
+  const allOptionalConditions = await ConditionController.findAllOptional();
+
+  // Filter so we only have `What you must do` conditions.
+  const allOptionalWhatYouMustDoConditions = allOptionalConditions.filter((condition) => {
+    return condition.category === 'What you must do';
+  });
+
+  const optionalWhatMustBeDoneConditionIds = new Set();
+
+  // Add the condition IDs to a set.
+  for (const condition of allOptionalWhatYouMustDoConditions) {
+    optionalWhatMustBeDoneConditionIds.add(condition.id);
+  }
 
   const conditionList = [];
 
+  // Filter the conditions to get the ones we want.
   const optionalConditions = conditions.filter((optional: any) => {
     return optionalWhatMustBeDoneConditionIds.has(optional.Condition.id);
   });
+
+  // Create an array of conditions.
   for (const condition of optionalConditions) {
     conditionList.push(condition.Condition.condition);
   }
 
+  // Join the conditions together with an escaped newline.
   return conditionList.join('\n\n');
 };
 
@@ -456,18 +620,35 @@ const createWhatYouMustDoOptionalConditionsList = (conditions: any): string => {
  * @param {any} conditions The list of conditions associated with the licence.
  * @returns {string} Returns a formatted list of optional general conditions.
  */
-const createReportingOptionalConditionsList = (conditions: any): string => {
-  const optionalReportingConditionIds = new Set([19, 20, 21, 22, 23, 24, 25]);
+const createReportingOptionalConditionsList = async (conditions: any): Promise<string> => {
+  // Get all optional conditions from the database.
+  const allOptionalConditions = await ConditionController.findAllOptional();
+
+  // Filter so we only have `Recording and reporting requirements` conditions.
+  const allOptionalReportingConditions = allOptionalConditions.filter((condition) => {
+    return condition.category === 'Recording and reporting requirements';
+  });
+
+  const optionalReportingConditionIds = new Set();
+
+  // Add the condition IDs to a set.
+  for (const condition of allOptionalReportingConditions) {
+    optionalReportingConditionIds.add(condition.id);
+  }
 
   const conditionList = [];
 
+  // Filter the conditions to get the ones we want.
   const optionalConditions = conditions.filter((optional: any) => {
     return optionalReportingConditionIds.has(optional.Condition.id);
   });
+
+  // Create an array of conditions.
   for (const condition of optionalConditions) {
     conditionList.push(condition.Condition.condition);
   }
 
+  // Join the conditions together with an escaped newline.
   return conditionList.join('\n\n');
 };
 
@@ -577,7 +758,7 @@ const LicenseController = {
       const applicationDetails: any = await Application.findOne(applicationId);
 
       // Set the email details personalisation.
-      const emailDetails = setLicenceNotificationDetails(applicationDetails, incomingLicense);
+      const emailDetails = await setLicenceNotificationDetails(applicationDetails, incomingLicense);
 
       // Try to send the email to the licence holder.
       await sendLicenceNotificationEmail(emailDetails, applicationDetails.LicenceHolder?.emailAddress);
@@ -611,7 +792,7 @@ const LicenseController = {
     const applicationDetails: any = await Application.findOne(applicationId);
 
     // Set the email details personalisation.
-    const emailDetails = setLicenceNotificationDetails(applicationDetails, applicationDetails.License);
+    const emailDetails = await setLicenceNotificationDetails(applicationDetails, applicationDetails.License);
 
     // Try to send the email to the licence holder.
     await sendLicenceNotificationEmail(emailDetails, applicationDetails.LicenceHolder?.emailAddress);

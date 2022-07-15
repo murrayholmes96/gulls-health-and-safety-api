@@ -1,4 +1,5 @@
 import utils from 'naturescot-utils';
+import {PActivityInterface} from 'models/p-activity';
 import {AssessmentInterface} from 'models/assessment';
 import {ContactInterface} from 'models/contact';
 import Condition from './condition';
@@ -189,6 +190,105 @@ const cleanActivity = (body: any, gullType: string): any => {
 };
 
 /**
+ * Cleans the amendment activity details into something the database can use.
+ *
+ * @param {any} body The body of the request to be cleaned.
+ * @param {string} gullType The type of gull the activities relate to.
+ * @returns {any} The cleaned amendment activity details.
+ */
+const cleanAmendActivity = (body: any, gullType: string): any => {
+  return {
+    removeNests: body.amendSpecies?.[gullType].activities.removeNests,
+    quantityNestsToRemove: body.amendSpecies?.[gullType].activities.quantityNestsToRemove
+      ? body.amendSpecies?.[gullType].activities.quantityNestsToRemove
+      : undefined,
+    eggDestruction: body.amendSpecies?.[gullType].activities.eggDestruction,
+    quantityNestsWhereEggsDestroyed: body.amendSpecies?.[gullType].activities.quantityNestsWhereEggsDestroyed
+      ? body.amendSpecies?.[gullType].activities.quantityNestsWhereEggsDestroyed
+      : undefined,
+    chicksToRescueCentre: body.amendSpecies?.[gullType].activities.chicksToRescueCentre,
+    quantityChicksToRescue: body.amendSpecies?.[gullType].activities.quantityChicksToRescue
+      ? body.amendSpecies?.[gullType].activities.quantityChicksToRescue
+      : undefined,
+    chicksRelocateNearby: body.amendSpecies?.[gullType].activities.chicksRelocateNearby,
+    quantityChicksToRelocate: body.amendSpecies?.[gullType].activities.quantityChicksToRelocate
+      ? body.amendSpecies?.[gullType].activities.quantityChicksToRelocate
+      : undefined,
+    killChicks: body.amendSpecies?.[gullType].activities.killChicks,
+    quantityChicksToKill: body.amendSpecies?.[gullType].activities.quantityChicksToKill
+      ? body.amendSpecies?.[gullType].activities.quantityChicksToKill
+      : undefined,
+    killAdults: body.amendSpecies?.[gullType].activities.killAdults,
+    quantityAdultsToKill: body.amendSpecies?.[gullType].activities.quantityAdultsToKill
+      ? body.amendSpecies?.[gullType].activities.quantityAdultsToKill
+      : undefined,
+  };
+};
+
+/**
+ * Cleans a return's activity details into something the database can use.
+ *
+ * @param {any} body The body of the request to be cleaned.
+ * @param {string} gullType The type of gull the return's activities relate to.
+ * @returns {any} The cleaned return activity details.
+ */
+const cleanReturnActivity = (body: any, gullType: string): any => {
+  return {
+    removeNests: body.species?.[gullType].activities.removeNests,
+    quantityNestsRemoved: body.species?.[gullType].activities.quantityNestsRemoved
+      ? body.species?.[gullType].activities.quantityNestsRemoved
+      : undefined,
+    quantityEggsRemoved: body.species?.[gullType].activities.quantityEggsRemoved
+      ? body.species?.[gullType].activities.quantityEggsRemoved
+      : undefined,
+    dateNestsEggsRemoved: body.species?.[gullType].activities.dateNestsEggsRemoved
+      ? body.species?.[gullType].activities.dateNestsEggsRemoved
+      : undefined,
+    eggDestruction: body.species?.[gullType].activities.eggDestruction,
+    quantityNestsAffected: body.species?.[gullType].activities.quantityNestsAffected
+      ? body.species?.[gullType].activities.quantityNestsAffected
+      : undefined,
+    quantityEggsDestroyed: body.species?.[gullType].activities.quantityEggsDestroyed
+      ? body.species?.[gullType].activities.quantityEggsDestroyed
+      : undefined,
+    dateNestsEggsDestroyed: body.species?.[gullType].activities.dateEggsDestroyed
+      ? body.species?.[gullType].activities.dateEggsDestroyed
+      : undefined,
+    chicksToRescueCentre: body.species?.[gullType].activities.chicksToRescueCentre,
+    quantityChicksToRescue: body.species?.[gullType].activities.quantityChicksToRescue
+      ? body.species?.[gullType].activities.quantityChicksToRescue
+      : undefined,
+    wildlifeCentre: body.species?.[gullType].activities.wildlifeCentre
+      ? body.species?.[gullType].activities.wildlifeCentre
+      : undefined,
+    dateChicksToRescue: body.species?.[gullType].activities.dateChicksToRescue
+      ? body.species?.[gullType].activities.dateChicksToRescue
+      : undefined,
+    chicksRelocatedNearby: body.species?.[gullType].activities.chicksRelocatedNearby,
+    quantityChicksRelocated: body.species?.[gullType].activities.quantityChicksRelocated
+      ? body.species?.[gullType].activities.quantityChicksRelocated
+      : undefined,
+    dateChicksRelocated: body.species?.[gullType].activities.dateChicksRelocated
+      ? body.species?.[gullType].activities.dateChicksRelocated
+      : undefined,
+    killChicks: body.species?.[gullType].activities.killChicks,
+    quantityChicksKilled: body.species?.[gullType].activities.quantityChicksKilled
+      ? body.species?.[gullType].activities.quantityChicksKilled
+      : undefined,
+    dateChicksKilled: body.species?.[gullType].activities.dateChicksKilled
+      ? body.species?.[gullType].activities.dateChicksKilled
+      : undefined,
+    killAdults: body.species?.[gullType].activities.killAdults,
+    quantityAdultsKilled: body.species?.[gullType].activities.quantityAdultsKilled
+      ? body.species?.[gullType].activities.quantityAdultsKilled
+      : undefined,
+    dateAdultsKilled: body.species?.[gullType].activities.dateAdultsKilled
+      ? body.species?.[gullType].activities.dateAdultsKilled
+      : undefined,
+  };
+};
+
+/**
  * Cleans the permitted activity details into something the database can use.
  *
  * @param {any} body The body of the request to be cleaned.
@@ -325,6 +425,14 @@ const cleanAssessment = (body: any): any => {
     cleanedBody.testTwoDecision = body.testTwoDecision;
   }
 
+  if (body.testThreeAssessment) {
+    cleanedBody.testThreeAssessment = body.testThreeAssessment.trim();
+  }
+
+  if ('testThreeDecision' in body) {
+    cleanedBody.testThreeDecision = body.testThreeDecision;
+  }
+
   if ('decision' in body) {
     cleanedBody.decision = body.decision;
   }
@@ -335,6 +443,116 @@ const cleanAssessment = (body: any): any => {
 
   if (body.refusalReason) {
     cleanedBody.refusalReason = body.refusalReason;
+  }
+
+  return cleanedBody;
+};
+
+/**
+ * Cleans the measure details into something the database can use.
+ *
+ * @param {any} body The body of the request to be cleaned.
+ * @returns {any} The cleaned measure details.
+ */
+const cleanAdditionalMeasure = (body: any): any => {
+  if (body.measuresToContinue || body.additionalMeasuresIntendToTry) {
+    return {
+      preventNesting: body.measuresToContinue.preventNesting
+        ? 'Continue'
+        : body.additionalMeasuresIntendToTry.preventNesting
+        ? 'Intend'
+        : 'No',
+      removeOldNests: body.measuresToContinue.removeOldNests
+        ? 'Continue'
+        : body.additionalMeasuresIntendToTry.removeOldNests
+        ? 'Intend'
+        : 'No',
+      removeLitter: body.measuresToContinue.removeLitter
+        ? 'Continue'
+        : body.additionalMeasuresIntendToTry.removeLitter
+        ? 'Intend'
+        : 'No',
+      humanDisturbance: body.measuresToContinue.humanDisturbance
+        ? 'Continue'
+        : body.additionalMeasuresIntendToTry.humanDisturbance
+        ? 'Intend'
+        : 'No',
+      scaringDevices: body.measuresToContinue.scaringDevices
+        ? 'Continue'
+        : body.additionalMeasuresIntendToTry.scaringDevices
+        ? 'Intend'
+        : 'No',
+      hawking: body.measuresToContinue.hawking
+        ? 'Continue'
+        : body.additionalMeasuresIntendToTry.hawking
+        ? 'Intend'
+        : 'No',
+      disturbanceByDogs: body.measuresToContinue.disturbanceByDogs
+        ? 'Continue'
+        : body.additionalMeasuresIntendToTry.disturbanceByDogs
+        ? 'Intend'
+        : 'No',
+    };
+  }
+
+  return undefined;
+};
+
+/**
+ * Cleans the permitted activity details into something the database can use.
+ *
+ * @param {any} body The body of the request to be cleaned.
+ * @returns {any} The cleaned activity details.
+ */
+const cleanPermittedActivityChange = (body: any): any => {
+  const cleanedBody: PActivityInterface = {};
+  // Check for the existence of each field and if found clean it if required and add to the cleanedBody object.
+  if ('removeNests' in body) {
+    cleanedBody.removeNests = body.removeNests;
+  }
+
+  if ('quantityNestsToRemove' in body) {
+    cleanedBody.quantityNestsToRemove = body.quantityNestsToRemove;
+  }
+
+  if ('eggDestruction' in body) {
+    cleanedBody.eggDestruction = body.eggDestruction;
+  }
+
+  if ('quantityNestsWhereEggsDestroyed' in body) {
+    cleanedBody.quantityNestsWhereEggsDestroyed = body.quantityNestsWhereEggsDestroyed;
+  }
+
+  if ('chicksToRescueCentre' in body) {
+    cleanedBody.chicksToRescueCentre = body.chicksToRescueCentre;
+  }
+
+  if ('quantityChicksToRescue' in body) {
+    cleanedBody.quantityChicksToRescue = body.quantityChicksToRescue;
+  }
+
+  if ('chicksRelocateNearby' in body) {
+    cleanedBody.chicksRelocateNearby = body.chicksRelocateNearby;
+  }
+
+  if ('quantityChicksToRelocate' in body) {
+    cleanedBody.quantityChicksToRelocate = body.quantityChicksToRelocate;
+  }
+
+  if ('killChicks' in body) {
+    cleanedBody.killChicks = body.killChicks;
+  }
+
+  if ('quantityChicksToKill' in body) {
+    cleanedBody.quantityChicksToKill = body.quantityChicksToKill;
+  }
+
+  if ('killAdults' in body) {
+    cleanedBody.killAdults = body.killAdults;
+  }
+
+  if ('quantityAdultsToKill' in body) {
+    cleanedBody.quantityAdultsToKill = body.quantityAdultsToKill;
   }
 
   return cleanedBody;
@@ -454,13 +672,48 @@ const cleanAuthenticationInfo = (body: any, existingId: string): any => {
 
   // Check the licenceNumber to ensure that it is a valid licence number.
   const regExNumbersOnly = /^\d+$/;
-  const isValidLengthLicenseNumber = licenceNumber.length === 6;
+  const isValidLengthLicenseNumber = licenceNumber.length >= 4 && licenceNumber.length <= 6;
   const isValidNumbersLicenseNumber = regExNumbersOnly.test(licenceNumber);
 
   return {
     licenceHolder: body.licenceHolder,
     postcode: isRealPostcode ? postcode : undefined,
     licenceNumber: isValidLengthLicenseNumber && isValidNumbersLicenseNumber ? licenceNumber : undefined,
+  };
+};
+
+/**
+ * Cleans the incoming requests body to ensure that the return's details are in a format the DB can use.
+ *
+ * @param {any} body The incoming request's body.
+ * @returns {any} A json object that's just got our cleaned up field on it.
+ */
+const cleanReturn = (body: any): any => {
+  return {
+    confirmedReturn: body.confirmDeclaration,
+    name: body.name,
+    isFinalReturn: body.isFinalReturn ? body.isFinalReturn : false,
+    isSiteVisitReturn: body.isSiteVisitReturn ? body.isSiteVisitReturn : false,
+    isReportingReturn: body.isReportingReturn ? body.isReportingReturn : false,
+    siteVisitDate: body.siteVisitDate ? body.siteVisitDate : undefined,
+    hasTriedPreventativeMeasures: body.hasTriedPreventativeMeasures ? body.hasTriedPreventativeMeasures : undefined,
+    preventativeMeasuresDetails: body.preventativeMeasuresDetails ? body.preventativeMeasuresDetails : undefined,
+    wasCompliant: body.wasCompliant ? body.wasCompliant : undefined,
+    complianceDetails: body.complianceDetails ? body.complianceDetails : undefined,
+  };
+};
+
+/**
+ * Cleans the incoming requests body to ensure that the amendment's details are in a format the DB can use.
+ *
+ * @param {any} body The incoming request's body.
+ * @returns {any} A json object that's just got our cleaned up field on it.
+ */
+const cleanAmendment = (body: any): any => {
+  return {
+    amendReason: body.amendReason ? body.amendReason.trim() : undefined,
+    assessment: body.assessment ? body.assessment.trim() : undefined,
+    amendedBy: body.amendedBy ? String(body.amendedBy).trim() : undefined,
   };
 };
 
@@ -478,12 +731,18 @@ const CleaningFunctions = {
   cleanPermittedActivity,
   cleanMeasure,
   cleanAssessment,
+  cleanAdditionalMeasure,
+  cleanPermittedActivityChange,
   cleanCondition,
   cleanAdvisory,
   cleanLicense,
   cleanNote,
   cleanWithdrawOrRevokeInput,
   cleanAuthenticationInfo,
+  cleanReturn,
+  cleanReturnActivity,
+  cleanAmendment,
+  cleanAmendActivity,
 };
 
 export default CleaningFunctions;

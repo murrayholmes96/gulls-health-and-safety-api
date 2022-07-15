@@ -1,9 +1,9 @@
 import * as jwt from 'jsonwebtoken';
-
 import transaction from 'sequelize/types/lib/transaction';
 import database from '../models/index.js';
 import config from '../config/app';
 import jwk from '../config/jwk.js';
+import MultiUseFunctions from '../multi-use-functions';
 
 const {
   Application,
@@ -16,6 +16,7 @@ const {
   Species,
   PSpecies,
   Assessment,
+  AssessmentMeasure,
   License,
   LicenseAdvisory,
   Advisory,
@@ -24,6 +25,8 @@ const {
   Note,
   Revocation,
   Withdrawal,
+  Returns,
+  Amendment,
 } = database;
 
 // Disabled rules because Notify client has no index.js and implicitly has "any" type, and this is how the import is done
@@ -59,14 +62,10 @@ interface ApplicationInterface {
   previousLicenceNumber: string;
   supportingInformation: string;
   confirmedByLicenseHolder: boolean;
+  confirmedAt?: Date;
   staffNumber: string;
   fourteenDayReminder: boolean;
 }
-
-// Create a more user friendly displayable date from a date object.
-const createDisplayDate = (date: Date) => {
-  return date.toLocaleDateString('en-GB', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'});
-};
 
 /**
  * This function returns an object containing the details required for the license holder direct email.
@@ -79,29 +78,10 @@ const createDisplayDate = (date: Date) => {
 const setLicenceHolderDirectEmailDetails = (newApplication: any, licenceHolderContact: any, siteAddress: any) => {
   return {
     licenceName: licenceHolderContact.name,
-    applicationDate: createDisplayDate(new Date(newApplication.createdAt)),
-    siteAddress: createSummaryAddress(siteAddress),
+    applicationDate: MultiUseFunctions.createDisplayDate(new Date(newApplication.createdAt)),
+    siteAddress: MultiUseFunctions.createSummaryAddress(siteAddress),
     id: newApplication.id,
   };
-};
-
-/**
- * This function returns a summary address built from the address fields of an address object.
- *
- * @param {any} fullAddress The address to use to build the summary address from.
- * @returns {string} Returns a string containing the summary address.
- */
-const createSummaryAddress = (fullAddress: any): string => {
-  const address = [];
-  address.push(fullAddress.addressLine1.trim());
-  // As addressLine2 is optional we need to check if it exists.
-  if (fullAddress.addressLine2) {
-    address.push(fullAddress.addressLine2.trim());
-  }
-
-  address.push(fullAddress.addressTown.trim(), fullAddress.addressCounty.trim(), fullAddress.postcode.trim());
-
-  return address.join(', ');
 };
 
 /**
@@ -119,7 +99,7 @@ const setReturnLoginMagicLinkEmailDetails = async (id: number, contact: any, mag
   // Create JWT.
   const token = jwt.sign({}, privateKey as string, {
     algorithm: 'ES256',
-    expiresIn: '30m',
+    expiresIn: '2h',
     noTimestamp: true,
     subject: `${id}`,
   });
@@ -171,8 +151,8 @@ const setHolderApplicantConfirmEmailDetails = (
   return {
     lhName: licenceHolderContact.name,
     laName: onBehalfContact.name,
-    applicationDate: createDisplayDate(new Date(createdAt)),
-    siteAddress: createSummaryAddress(siteAddress),
+    applicationDate: MultiUseFunctions.createDisplayDate(new Date(createdAt)),
+    siteAddress: MultiUseFunctions.createSummaryAddress(siteAddress),
     id,
   };
 };
@@ -252,7 +232,7 @@ const setLicenceHolderMagicLinkDetails = async (
   // Create JWT.
   const token = jwt.sign({}, privateKey as string, {
     algorithm: 'ES256',
-    expiresIn: '28 days',
+    expiresIn: '21 days',
     noTimestamp: true,
     subject: `${applicationId}`,
   });
@@ -418,6 +398,11 @@ const ApplicationController = {
           paranoid: false,
         },
         {
+          model: AssessmentMeasure,
+          as: 'AssessmentMeasure',
+          paranoid: false,
+        },
+        {
           model: Note,
           as: 'ApplicationNotes',
           paranoid: false,
@@ -450,6 +435,16 @@ const ApplicationController = {
                   paranoid: false,
                 },
               ],
+            },
+            {
+              model: Returns,
+              as: 'Returns',
+              paranoid: false,
+            },
+            {
+              model: Amendment,
+              as: 'Amendment',
+              paranoid: false,
             },
           ],
         },
@@ -635,11 +630,11 @@ const ApplicationController = {
       let remainingAttempts = 10; // Allow 10 attempts to check if the ID is in use.
       let foundExistingId = true; // Assume true until checked.
 
-      // Generate a random 6 digit ID and check if it's already in use.
+      // Generate a random 6 digit ID between 1000 and 999_999 and checks if it's already in use.
       // No await in loop disabled because we need to wait for the result.
       /* eslint-disable no-await-in-loop */
       while (foundExistingId && remainingAttempts > 0) {
-        newId = Math.floor(Math.random() * 999_999);
+        newId = Math.floor(Math.random() * (999_999 - 1000) + 1000);
         existingApplication = await Application.findByPk(newId);
         if (!existingApplication) {
           foundExistingId = false;
@@ -682,6 +677,7 @@ const ApplicationController = {
       // Send the email using the Notify service's API.
       await sendLicenceApplicantNotificationEmail(emailDetails, onBehalfContact.emailAddress);
       await sendLicenceHolderMagicLinkEmail(magicLinkEmailDetails, licenceHolderContact.emailAddress);
+      await sendLicenceHolderMagicLinkEmail(magicLinkEmailDetails, 'issuedlicence@nature.scot');
     } else {
       // Else if the licence holder applied directly send them a confirmation email.
       // Set the details of the email.
@@ -929,6 +925,8 @@ const ApplicationController = {
         await Issue.destroy({where: {ApplicationId: id}, transaction: t});
         // Soft delete the assessment attached to the application/license.
         await Assessment.destroy({where: {ApplicationId: id}, transaction: t});
+        // Soft delete any Assessment Measure attached to the application/license.
+        await AssessmentMeasure.destroy({where: {ApplicationId: id}, transaction: t});
         // Soft delete any advisories or conditions attached to the application/license.
         await LicenseAdvisory.destroy({where: {LicenseId: id}, transaction: t});
         await LicenseCondition.destroy({where: {LicenseId: id}, transaction: t});
@@ -1093,6 +1091,8 @@ const ApplicationController = {
         await Issue.destroy({where: {ApplicationId: id}, force: true, transaction: t});
         // Delete the assessment attached to the application/license.
         await Assessment.destroy({where: {ApplicationId: id}, force: true, transaction: t});
+        // Delete any assessment Measure attached to the application/license.
+        await AssessmentMeasure.destroy({where: {ApplicationId: id}, force: true, transaction: t});
 
         // If everything worked then return true.
         return true;

@@ -1,9 +1,9 @@
 import {DataTypes, Model, Sequelize} from 'sequelize';
 
 /**
- * Local interface to hold the PActivityInterface.
+ * Local interface to hold the AActivityInterface.
  */
-interface PActivityInterface {
+interface AActivityInterface {
   id?: number;
   removeNests?: boolean;
   quantityNestsToRemove?: string;
@@ -20,13 +20,13 @@ interface PActivityInterface {
 }
 
 /**
- * Build an Permitted Activity model.
+ * Build an Amended Activity model.
  *
  * @param {Sequelize.Sequelize} sequelize A Sequelize connection.
- * @returns {Sequelize.Model} An Permitted Activity model.
+ * @returns {Sequelize.Model} An Amended Activity model.
  */
-const PActivityModel = (sequelize: Sequelize) => {
-  class PActivity extends Model {
+const AActivityModel = (sequelize: Sequelize) => {
+  class AActivity extends Model {
     public id!: number;
     public removeNests!: boolean;
     public quantityNestsToRemove!: string;
@@ -42,7 +42,7 @@ const PActivityModel = (sequelize: Sequelize) => {
     public quantityAdultsToKill!: number;
   }
 
-  PActivity.init(
+  AActivity.init(
     {
       removeNests: {
         type: DataTypes.BOOLEAN,
@@ -83,14 +83,14 @@ const PActivityModel = (sequelize: Sequelize) => {
     },
     {
       sequelize,
-      modelName: 'PActivity',
+      modelName: 'AActivity',
       timestamps: true,
       paranoid: true,
     },
   );
 
-  return PActivity;
+  return AActivity;
 };
 
-export {PActivityModel as default};
-export {PActivityInterface};
+export {AActivityModel as default};
+export {AActivityInterface};
